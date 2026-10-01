@@ -1,0 +1,6 @@
+{
+  "name": "מצפן פיננסי - בינה פיננסית וניהול עושר",
+  "description": "פלטפורמת בינה פיננסית אישית לתכנון, סיווג מדויק, מעקב מטרות, השקעות וסימולציות עתידיות",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
