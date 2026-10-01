@@ -136,3 +136,14 @@ export interface DataQualityReport {
   }[];
   recommendations: string[];
 }
+
+export interface UploadedDocument {
+  id: string;
+  fileName: string;
+  fileType: 'pdf' | 'csv' | 'xlsx' | 'xls';
+  fileSize: number;
+  uploadDate: string;
+  status: 'completed' | 'processing' | 'error';
+  transactionsCount: number;
+  institution?: string;
+}

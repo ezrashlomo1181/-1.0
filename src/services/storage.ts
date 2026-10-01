@@ -8,6 +8,7 @@ import {
   AnomalyAlert,
   LearnedRule,
   DataQualityReport,
+  UploadedDocument,
 } from '../types/financial';
 import {
   INITIAL_ACCOUNTS,
@@ -19,6 +20,7 @@ import {
   INITIAL_ANOMALIES,
   INITIAL_RULES,
   INITIAL_DATA_QUALITY,
+  INITIAL_DOCUMENTS,
 } from '../data/demoData';
 
 export interface AppState {
@@ -32,6 +34,7 @@ export interface AppState {
   anomalies: AnomalyAlert[];
   learnedRules: LearnedRule[];
   dataQuality: DataQualityReport;
+  documents: UploadedDocument[];
 }
 
 const STORAGE_KEY = 'matzpen_financial_app_state_v1';
@@ -42,6 +45,9 @@ export function loadInitialState(): AppState {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.transactions)) {
+        if (!Array.isArray(parsed.documents)) {
+          parsed.documents = INITIAL_DOCUMENTS;
+        }
         return parsed;
       }
     }
@@ -60,6 +66,7 @@ export function loadInitialState(): AppState {
     anomalies: INITIAL_ANOMALIES,
     learnedRules: INITIAL_RULES,
     dataQuality: INITIAL_DATA_QUALITY,
+    documents: INITIAL_DOCUMENTS,
   };
 }
 
@@ -83,6 +90,7 @@ export function resetToDemoData(): AppState {
     anomalies: INITIAL_ANOMALIES,
     learnedRules: INITIAL_RULES,
     dataQuality: INITIAL_DATA_QUALITY,
+    documents: INITIAL_DOCUMENTS,
   };
   saveState(defaultState);
   return defaultState;
@@ -99,6 +107,7 @@ export function switchToMyDataEmpty(): AppState {
     recurring: [],
     anomalies: [],
     learnedRules: [],
+    documents: [],
     dataQuality: {
       overallScore: 0,
       institutions: [],

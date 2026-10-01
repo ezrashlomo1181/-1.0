@@ -8,6 +8,7 @@ import {
   AnomalyAlert,
   LearnedRule,
   DataQualityReport,
+  UploadedDocument,
 } from '../types/financial';
 
 export const INITIAL_ACCOUNTS: Account[] = [
@@ -872,3 +873,47 @@ export const INITIAL_DATA_QUALITY: DataQualityReport = {
     'כל ההעברות הפנימיות זוהו ונוטרלו אוטומטית למניעת עיוות כפול בהכנסות.',
   ],
 };
+
+export const INITIAL_DOCUMENTS: UploadedDocument[] = [
+  {
+    id: 'doc-isracard-sept',
+    fileName: 'פירוט_ישראכרט_ספטמבר_2026.xlsx',
+    fileType: 'xlsx',
+    fileSize: 248500,
+    uploadDate: '2026-09-29',
+    status: 'completed',
+    transactionsCount: 38,
+    institution: 'ישראכרט',
+  },
+  {
+    id: 'doc-hapoalim-sept',
+    fileName: 'תדפיס_עוש_פועלים_202609.pdf',
+    fileType: 'pdf',
+    fileSize: 412300,
+    uploadDate: '2026-09-28',
+    status: 'completed',
+    transactionsCount: 42,
+    institution: 'בנק הפועלים',
+  },
+  {
+    id: 'doc-max-sept',
+    fileName: 'פירוט_כרטיס_MAX_ספטמבר_2026.csv',
+    fileType: 'csv',
+    fileSize: 98400,
+    uploadDate: '2026-09-25',
+    status: 'completed',
+    transactionsCount: 24,
+    institution: 'MAX',
+  },
+  {
+    id: 'doc-meitav-annual',
+    fileName: 'דוח_יתרות_מיטב_טרייד_2026.pdf',
+    fileType: 'pdf',
+    fileSize: 520000,
+    uploadDate: '2026-09-20',
+    status: 'completed',
+    transactionsCount: 16,
+    institution: 'מיטב טרייד',
+  },
+];
+

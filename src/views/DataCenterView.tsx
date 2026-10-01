@@ -17,11 +17,15 @@ import {
 
 interface DataCenterViewProps {
   dataQuality: DataQualityReport;
+  documentsCount: number;
+  onOpenMyDocuments: () => void;
   onImportFile: (file: File, extractedCount: number) => void;
 }
 
 export const DataCenterView: React.FC<DataCenterViewProps> = ({
   dataQuality,
+  documentsCount,
+  onOpenMyDocuments,
   onImportFile,
 }) => {
   const [selectedProvider, setSelectedProvider] = useState<string>('isracard');
@@ -238,10 +242,25 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
           </p>
         </div>
 
-        {/* Philosophy Badge */}
-        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-1.5 text-xs text-emerald-300 flex items-center gap-1.5">
-          <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
-          <span>חילוץ אוטומטי + אימות אנושי בעת אי-ודאות</span>
+        <div className="flex items-center gap-2.5">
+          {/* My Documents Button */}
+          <button
+            type="button"
+            onClick={onOpenMyDocuments}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-white font-semibold text-xs border border-slate-700 hover:border-slate-600 transition-colors shadow-sm"
+          >
+            <FileText className="w-4 h-4 text-emerald-400" />
+            <span>המסמכים שלי</span>
+            <span className="font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 px-2 py-0.5 rounded-full text-[11px] font-bold">
+              {documentsCount}
+            </span>
+          </button>
+
+          {/* Philosophy Badge */}
+          <div className="hidden sm:inline-flex bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-2 text-xs text-emerald-300 items-center gap-1.5">
+            <Sparkles className="w-3.5 h-3.5 text-emerald-400" />
+            <span>חילוץ אוטומטי + אימות אי-ודאות</span>
+          </div>
         </div>
       </div>
 

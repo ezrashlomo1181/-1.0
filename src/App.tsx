@@ -13,12 +13,14 @@ import {
   FinancialGoal,
   RecurringCommitment,
   InvestmentAsset,
+  UploadedDocument,
 } from './types/financial';
 import { Sidebar, NavSection } from './components/Sidebar';
 import { Header } from './components/Header';
 import { VerificationModal } from './components/VerificationModal';
 import { DataTraceModal } from './components/DataTraceModal';
 import { OnboardingModal } from './components/OnboardingModal';
+import { MyDocumentsModal } from './components/MyDocumentsModal';
 
 // Views
 import { DashboardView } from './views/DashboardView';
@@ -53,6 +55,7 @@ export default function App() {
     transactions: [],
   });
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
+  const [isMyDocumentsOpen, setIsMyDocumentsOpen] = useState(false);
 
   // Sync state to localStorage whenever modified
   useEffect(() => {
@@ -176,6 +179,25 @@ export default function App() {
     const isCard = file.name.toLowerCase().includes('card') || file.name.includes('אשראי') || file.name.includes('max') || file.name.includes('ישראכרט');
     const isInvest = file.name.toLowerCase().includes('invest') || file.name.includes('השקעות') || file.name.includes('מיטב');
 
+    const fileExt = file.name.toLowerCase().endsWith('.pdf')
+      ? 'pdf'
+      : file.name.toLowerCase().endsWith('.csv')
+      ? 'csv'
+      : file.name.toLowerCase().endsWith('.xls')
+      ? 'xls'
+      : 'xlsx';
+
+    const newDoc: UploadedDocument = {
+      id: `doc-${Date.now()}`,
+      fileName: file.name,
+      fileType: fileExt,
+      fileSize: file.size,
+      uploadDate: new Date().toISOString().split('T')[0],
+      status: 'completed',
+      transactionsCount: extractedCount,
+      institution: isInvest ? 'מיטב טרייד' : isCard ? 'ישראכרט' : 'בנק הפועלים',
+    };
+
     const newTransactions: Transaction[] = [
       {
         id: `tx-import-1-${Date.now()}`,
@@ -221,12 +243,31 @@ export default function App() {
 
     setState((prev) => ({
       ...prev,
+      documents: [newDoc, ...prev.documents],
       transactions: [...newTransactions, ...prev.transactions],
       dataQuality: {
         ...prev.dataQuality,
         overallScore: Math.min(100, prev.dataQuality.overallScore + 4),
       },
     }));
+  };
+
+  // Real document deletion: removes the document AND all transactions imported from it
+  const handleDeleteDocument = (docId: string, fileName: string) => {
+    setState((prev) => {
+      const remainingDocs = prev.documents.filter((d) => d.id !== docId);
+      const remainingTxs = prev.transactions.filter((tx) => tx.sourceDocument !== fileName);
+
+      return {
+        ...prev,
+        documents: remainingDocs,
+        transactions: remainingTxs,
+        dataQuality: {
+          ...prev.dataQuality,
+          overallScore: Math.max(25, prev.dataQuality.overallScore - 3),
+        },
+      };
+    });
   };
 
   return (
@@ -335,6 +376,8 @@ export default function App() {
           {currentSection === 'datacenter' && (
             <DataCenterView
               dataQuality={state.dataQuality}
+              documentsCount={state.documents.length}
+              onOpenMyDocuments={() => setIsMyDocumentsOpen(true)}
               onImportFile={handleImportFile}
             />
           )}
@@ -382,6 +425,14 @@ export default function App() {
         isOpen={isOnboardingOpen}
         onClose={() => setIsOnboardingOpen(false)}
         onOpenDataCenter={() => setCurrentSection('datacenter')}
+      />
+
+      {/* My Documents Management Modal */}
+      <MyDocumentsModal
+        isOpen={isMyDocumentsOpen}
+        onClose={() => setIsMyDocumentsOpen(false)}
+        documents={state.documents}
+        onDeleteDocument={handleDeleteDocument}
       />
     </div>
   );
