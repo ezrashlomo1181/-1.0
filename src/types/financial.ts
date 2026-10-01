@@ -162,5 +162,24 @@ export interface UserProfile {
   scheduledDeletionDate: string | null;
   financialProfileCompletion: number; // 0 - 100
   onboardingCompleted: boolean;
+  isDemoUser?: boolean;
 }
+
+export interface ManagedFileItem {
+  id: string;
+  fileName: string;
+  fileSize: number;
+  fileType: 'pdf' | 'csv' | 'xlsx' | 'xls' | 'unknown';
+  folderPath?: string;
+  fileHash: string;
+  uploadStatus: 'waiting' | 'uploading' | 'uploaded' | 'failed';
+  processingStatus: 'waiting' | 'processing' | 'processed' | 'needs_review';
+  duplicateStatus: 'none' | 'potential_duplicate' | 'confirmed_duplicate';
+  extractedTransactionsCount: number;
+  institutionDetected?: string;
+  createdAt: string;
+  errorDetails?: string;
+  isTestFile?: boolean;
+}
+
 

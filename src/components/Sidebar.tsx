@@ -15,7 +15,9 @@ import {
   ChevronLeft,
   X,
   Compass,
+  FlaskConical,
 } from 'lucide-react';
+import { areTestingToolsEnabled } from '../config/testingConfig';
 
 export type NavSection =
   | 'dashboard'
@@ -29,7 +31,8 @@ export type NavSection =
   | 'datacenter'
   | 'ask'
   | 'settings'
-  | 'admin';
+  | 'admin'
+  | 'developer';
 
 interface SidebarProps {
   currentSection: NavSection;
@@ -73,6 +76,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
             icon: ShieldAlert,
             badge: 'Admin',
             badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+          },
+        ]
+      : []),
+    ...(areTestingToolsEnabled()
+      ? [
+          {
+            id: 'developer',
+            label: 'סביבת בדיקות (Dev Panel)',
+            icon: FlaskConical,
+            badge: 'Test',
+            badgeColor: 'bg-amber-500/20 text-amber-300 border-amber-500/30',
           },
         ]
       : []),

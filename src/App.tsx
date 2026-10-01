@@ -46,6 +46,8 @@ import { DataCenterView } from './views/DataCenterView';
 import { AskFinancesView } from './views/AskFinancesView';
 import { SettingsView } from './views/SettingsView';
 import { AdminView } from './views/AdminView';
+import { DeveloperTestView } from './views/DeveloperTestView';
+import { areTestingToolsEnabled } from './config/testingConfig';
 
 import { AlertTriangle, Clock } from 'lucide-react';
 
@@ -416,6 +418,248 @@ export default function App() {
     }
   };
 
+  // Switch demo user session (Section 15 & 16)
+  const handleSwitchTestUser = (mockUser: UserProfile) => {
+    setUserProfile(mockUser);
+    setCurrentSection('dashboard');
+
+    // Seed mockUser-specific financial isolation state
+    if (mockUser.id === 'demo-user-1') {
+      const demo1State = resetToDemoData();
+      setState({
+        ...demo1State,
+        accounts: [
+          {
+            id: 'acc-poalim-demo',
+            name: 'בנק הפועלים (עו״ש ראשי)',
+            type: 'bank',
+            balance: 24800,
+            institution: 'בנק הפועלים',
+            currency: 'ILS',
+            accountNumberMasked: '•••• 4821',
+            importedMonthsCount: 12,
+            lastUpdated: new Date().toISOString(),
+          },
+          {
+            id: 'acc-isracard-demo',
+            name: 'ישראכרט Gold משפחתי',
+            type: 'credit_card',
+            balance: -4250,
+            institution: 'ישראכרט',
+            currency: 'ILS',
+            accountNumberMasked: '•••• 9102',
+            importedMonthsCount: 12,
+            lastUpdated: new Date().toISOString(),
+          },
+        ],
+      });
+    } else if (mockUser.id === 'demo-user-2') {
+      setState({
+        accounts: [
+          {
+            id: 'acc-leumi-demo2',
+            name: 'בנק לאומי עסקי ופרטי',
+            type: 'bank',
+            balance: 68500,
+            institution: 'בנק לאומי',
+            currency: 'ILS',
+            accountNumberMasked: '•••• 7714',
+            importedMonthsCount: 8,
+            lastUpdated: new Date().toISOString(),
+          },
+          {
+            id: 'acc-meitav-demo2',
+            name: 'מיטב טרייד - תיק מניות',
+            type: 'investment',
+            balance: 142000,
+            institution: 'מיטב טרייד',
+            currency: 'ILS',
+            accountNumberMasked: '•••• 3302',
+            importedMonthsCount: 12,
+            lastUpdated: new Date().toISOString(),
+          },
+        ],
+        transactions: [
+          {
+            id: 'tx-d2-1',
+            date: '2026-09-28',
+            amount: 22000,
+            currency: 'ILS',
+            merchant: 'תקבול מלקוח עסקי - חברת הייטק',
+            description: 'חשבונית מס קבלה 104',
+            accountId: 'acc-leumi-demo2',
+            accountName: 'בנק לאומי עסקי',
+            paymentMethod: 'bank_transfer',
+            category: 'הכנסה',
+            type: 'income',
+            isRecurring: false,
+            confidenceScore: 0.99,
+            confidenceLevel: 'high',
+            needsReview: false,
+            userConfirmed: true,
+          },
+          {
+            id: 'tx-d2-2',
+            date: '2026-09-25',
+            amount: 8500,
+            currency: 'ILS',
+            merchant: 'רכישת מניות S&P 500 ETF',
+            description: 'קנייה דרך מערכת מסחר',
+            accountId: 'acc-meitav-demo2',
+            accountName: 'מיטב טרייד',
+            paymentMethod: 'bank_transfer',
+            category: 'השקעות',
+            type: 'investment_contribution',
+            isRecurring: false,
+            confidenceScore: 0.98,
+            confidenceLevel: 'high',
+            needsReview: false,
+            userConfirmed: true,
+          },
+        ],
+        budgets: [
+          { id: 'b-d2-1', category: 'השקעות', allocated: 8000, spent: 8500, iconName: 'TrendingUp' },
+          { id: 'b-d2-2', category: 'עסקי והוצאות', allocated: 5000, spent: 3400, iconName: 'Briefcase' },
+        ],
+        goals: [
+          {
+            id: 'g-d2-1',
+            name: 'חיסכון לדירה להשקעה',
+            targetAmount: 350000,
+            currentAmount: 185000,
+            targetDate: '2028-12-31',
+            monthlyContribution: 5000,
+            category: 'home',
+          },
+        ],
+        investments: [
+          {
+            id: 'inv-d2-1',
+            name: 'קרן סל מחקה מדד S&P 500',
+            symbol: 'CSPX',
+            type: 'etf',
+            currentValue: 142000,
+            investedAmount: 118000,
+            unrealizedGain: 24000,
+            gainPercentage: 20.3,
+            allocationPercentage: 100,
+            accountName: 'מיטב טרייד',
+          },
+        ],
+        recurring: [],
+        anomalies: [],
+        learnedRules: [],
+        dataQuality: {
+          overallScore: 60,
+          institutions: [{ name: 'בנק לאומי', type: 'בנק', status: 'good', monthsCovered: 8, recommendedMonths: 12, notes: 'תקין' }],
+          recommendations: ['ייבא דוח שנתי ממיטב טרייד להשלמת התשואה'],
+        },
+        documents: [],
+        isDemoMode: false,
+      });
+    } else if (mockUser.id === 'demo-user-3') {
+      setState({
+        accounts: [
+          {
+            id: 'acc-discount-demo3',
+            name: 'בנק דיסקונט (חשבון סטודנט)',
+            type: 'bank',
+            balance: 1420,
+            institution: 'בנק דיסקונט',
+            currency: 'ILS',
+            accountNumberMasked: '•••• 1209',
+            importedMonthsCount: 3,
+            lastUpdated: new Date().toISOString(),
+          },
+        ],
+        transactions: [
+          {
+            id: 'tx-d3-1',
+            date: '2026-09-29',
+            amount: 3200,
+            currency: 'ILS',
+            merchant: 'מלגת לימודים אוניברסיטאית',
+            description: 'העברה ממוסד אקדמי',
+            accountId: 'acc-discount-demo3',
+            accountName: 'בנק דיסקונט',
+            paymentMethod: 'bank_transfer',
+            category: 'הכנסה',
+            type: 'income',
+            isRecurring: true,
+            confidenceScore: 0.98,
+            confidenceLevel: 'high',
+            needsReview: false,
+            userConfirmed: true,
+          },
+          {
+            id: 'tx-d3-2',
+            date: '2026-09-24',
+            amount: 1950,
+            currency: 'ILS',
+            merchant: 'שכר דירת שותפים',
+            description: 'העברה בביט',
+            accountId: 'acc-discount-demo3',
+            accountName: 'בנק דיסקונט',
+            paymentMethod: 'bit',
+            category: 'דיור',
+            type: 'expense',
+            isRecurring: true,
+            confidenceScore: 0.95,
+            confidenceLevel: 'high',
+            needsReview: false,
+            userConfirmed: true,
+          },
+        ],
+        budgets: [
+          { id: 'b-d3-1', category: 'דיור', allocated: 2000, spent: 1950, iconName: 'Home' },
+          { id: 'b-d3-2', category: 'מזון וסופר', allocated: 800, spent: 720, iconName: 'ShoppingBag' },
+        ],
+        goals: [
+          {
+            id: 'g-d3-1',
+            name: 'קרן חירום סטודנטיאלית',
+            targetAmount: 10000,
+            currentAmount: 2500,
+            targetDate: '2027-06-30',
+            monthlyContribution: 300,
+            category: 'emergency_fund',
+          },
+        ],
+        investments: [],
+        recurring: [],
+        anomalies: [],
+        learnedRules: [],
+        dataQuality: {
+          overallScore: 40,
+          institutions: [{ name: 'בנק דיסקונט', type: 'בנק', status: 'partial', monthsCovered: 3, recommendedMonths: 12, notes: 'חסר כיסוי' }],
+          recommendations: ['ייבא תדפיס של 6 חודשים לדיוק התקציב'],
+        },
+        documents: [],
+        isDemoMode: false,
+      });
+    }
+  };
+
+  // Reset test environment (Section 17 & 20)
+  const handleResetTestEnvironment = () => {
+    // Clear only demo user keys
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
+      if (key && (key.startsWith('matzpen_user_demo') || key.includes('test'))) {
+        localStorage.removeItem(key);
+      }
+    }
+    const clean = switchToMyDataEmpty();
+    setState(clean);
+    alert('סביבת הבדיקות אופסה בהצלחה! כל נתוני ה-Demo נוקו. משתמשי אמת לא הושפעו.');
+  };
+
+  // Inject test file directly into data center
+  const handleInjectTestFile = (file: File) => {
+    handleImportFile(file, Math.floor(Math.random() * 15) + 12);
+    setCurrentSection('datacenter');
+  };
+
   // Onboarding Completion Choice
   const handleOnboardingComplete = (choice: 'upload' | 'manual' | 'explore') => {
     setIsUserOnboardingOpen(false);
@@ -567,6 +811,7 @@ export default function App() {
             <DataCenterView
               dataQuality={state.dataQuality}
               documentsCount={state.documents.length}
+              existingDocuments={state.documents}
               onOpenMyDocuments={() => setIsMyDocumentsOpen(true)}
               onImportFile={handleImportFile}
             />
@@ -593,9 +838,19 @@ export default function App() {
             />
           )}
 
-          {/* Admin Management Dashboard (#4 & #5) */}
+          {/* Admin Management Dashboard (#12 & #13) */}
           {currentSection === 'admin' && isAdminUser && (
             <AdminView currentUserEmail={userProfile?.email || ''} />
+          )}
+
+          {/* Developer / Testing Panel (#15 - #20) */}
+          {currentSection === 'developer' && areTestingToolsEnabled() && (
+            <DeveloperTestView
+              currentUser={userProfile}
+              onSwitchUser={handleSwitchTestUser}
+              onResetTestEnvironment={handleResetTestEnvironment}
+              onInjectTestFile={handleInjectTestFile}
+            />
           )}
         </main>
       </div>
