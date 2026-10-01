@@ -20,10 +20,8 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
   const chartWidth = width - paddingX * 2;
   const chartHeight = height - paddingTop - paddingBottom;
 
-  const maxVal = Math.max(
-    ...data.map((d) => Math.max(d.income, d.expense, d.savings)),
-    28000
-  ) * 1.1;
+  const maxVal =
+    Math.max(...data.map((d) => Math.max(d.income, d.expense, d.savings)), 28000) * 1.1;
 
   const getX = (index: number) => {
     if (data.length <= 1) return paddingX;
@@ -34,7 +32,6 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
     return paddingTop + chartHeight - (val / maxVal) * chartHeight;
   };
 
-  // Generate SVG path for a line
   const createLinePath = (getter: (d: MonthDataPoint) => number) => {
     return data
       .map((d, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(getter(d))}`)
@@ -50,48 +47,51 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
   };
 
   return (
-    <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 shadow-xl relative overflow-hidden backdrop-blur-sm">
+    <div className="bg-white dark:bg-[#111827] rounded-xl border border-slate-200 dark:border-[#1F2937] p-5 shadow-xs relative overflow-hidden transition-colors">
       <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
         <div>
-          <div className="flex items-center gap-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <h3 className="text-base font-semibold text-white">תזרים חודשי: הכנסות, הוצאות וחיסכון</h3>
-          </div>
-          <p className="text-xs text-slate-400 mt-0.5">
-            השוואת תזרים היסטורי מנוטרלת מהעברות פנימיות ופירעונות כפולים
+          <h3 className="text-sm font-bold text-[#0F172A] dark:text-white">
+            תזרים חודשי: הכנסות, הוצאות וחיסכון
+          </h3>
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            השוואת תזרים היסטורי מנוטרלת מהעברות פנימיות
           </p>
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           {/* Legend */}
-          <div className="flex items-center gap-3 text-xs ml-4">
+          <div className="flex items-center gap-3 text-xs">
             <div className="flex items-center gap-1.5">
-              <span className="w-3 h-1.5 rounded-sm bg-emerald-400 inline-block"></span>
-              <span className="text-slate-300">הכנסה</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-[#059669] inline-block"></span>
+              <span className="text-slate-600 dark:text-slate-300 font-medium">הכנסה</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-3 h-1.5 rounded-sm bg-rose-400 inline-block"></span>
-              <span className="text-slate-300">הוצאה</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-[#BE123C] inline-block"></span>
+              <span className="text-slate-600 dark:text-slate-300 font-medium">הוצאה</span>
             </div>
             <div className="flex items-center gap-1.5">
-              <span className="w-3 h-1.5 rounded-sm bg-indigo-400 inline-block"></span>
-              <span className="text-slate-300">חיסכון</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-slate-500 dark:bg-slate-400 inline-block"></span>
+              <span className="text-slate-600 dark:text-slate-300 font-medium">חיסכון</span>
             </div>
           </div>
 
-          <div className="flex rounded-lg border border-slate-700/60 bg-slate-800/60 p-0.5 text-xs">
+          <div className="flex rounded-lg border border-slate-200 dark:border-[#1F2937] bg-slate-100 dark:bg-[#0B0F17] p-0.5 text-xs">
             <button
               onClick={() => setPeriod('6m')}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
-                period === '6m' ? 'bg-slate-700 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
+              className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                period === '6m'
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
               6 חודשים
             </button>
             <button
               onClick={() => setPeriod('12m')}
-              className={`px-2.5 py-1 rounded-md transition-colors ${
-                period === '12m' ? 'bg-slate-700 text-white font-medium' : 'text-slate-400 hover:text-slate-200'
+              className={`px-2.5 py-1 rounded-md transition-colors cursor-pointer ${
+                period === '12m'
+                  ? 'bg-white dark:bg-slate-800 text-slate-900 dark:text-white font-semibold shadow-xs'
+                  : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
               12 חודשים
@@ -108,12 +108,12 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
         >
           <defs>
             <linearGradient id="incomeGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#10b981" stopOpacity="0.22" />
-              <stop offset="100%" stopColor="#10b981" stopOpacity="0.0" />
+              <stop offset="0%" stopColor="#059669" stopOpacity="0.08" />
+              <stop offset="100%" stopColor="#059669" stopOpacity="0.0" />
             </linearGradient>
             <linearGradient id="expenseGrad" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.18" />
-              <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.0" />
+              <stop offset="0%" stopColor="#BE123C" stopOpacity="0.07" />
+              <stop offset="100%" stopColor="#BE123C" stopOpacity="0.0" />
             </linearGradient>
           </defs>
 
@@ -128,17 +128,14 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
                   y1={y}
                   x2={width - paddingX}
                   y2={y}
-                  stroke="#334155"
-                  strokeDasharray="4 4"
-                  strokeOpacity="0.35"
+                  className="stroke-slate-200 dark:stroke-[#1F2937]"
+                  strokeDasharray="3 3"
                 />
                 <text
                   x={paddingX - 8}
                   y={y + 4}
-                  fill="#64748b"
-                  fontSize="10"
+                  className="fill-slate-400 dark:fill-slate-500 font-mono text-[10px]"
                   textAnchor="end"
-                  className="font-mono"
                 >
                   ₪{(val / 1000).toFixed(0)}k
                 </text>
@@ -154,23 +151,23 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
           <path
             d={createLinePath((d) => d.income)}
             fill="none"
-            stroke="#10b981"
-            strokeWidth="2.5"
+            className="stroke-[#059669]"
+            strokeWidth="2"
             strokeLinecap="round"
           />
           <path
             d={createLinePath((d) => d.expense)}
             fill="none"
-            stroke="#f43f5e"
-            strokeWidth="2.5"
+            className="stroke-[#BE123C]"
+            strokeWidth="2"
             strokeLinecap="round"
           />
           <path
             d={createLinePath((d) => d.savings)}
             fill="none"
-            stroke="#818cf8"
-            strokeWidth="2"
-            strokeDasharray="5 3"
+            className="stroke-slate-500 dark:stroke-slate-400"
+            strokeWidth="1.5"
+            strokeDasharray="4 3"
             strokeLinecap="round"
           />
 
@@ -181,7 +178,7 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
             return (
               <g
                 key={i}
-                className="cursor-pointer transition-transform"
+                className="cursor-pointer"
                 onMouseEnter={() => setHoveredIdx(i)}
                 onMouseLeave={() => setHoveredIdx(null)}
                 onClick={() => onMonthClick?.(d)}
@@ -193,7 +190,7 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
                     y1={paddingTop}
                     x2={x}
                     y2={paddingTop + chartHeight}
-                    stroke="#94a3b8"
+                    className="stroke-slate-400 dark:stroke-slate-600"
                     strokeWidth="1.5"
                     strokeDasharray="2 2"
                   />
@@ -203,25 +200,22 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
                 <circle
                   cx={x}
                   cy={getY(d.income)}
-                  r={isHovered ? 5.5 : 3.5}
-                  fill="#10b981"
-                  stroke="#0f172a"
+                  r={isHovered ? 4.5 : 2.5}
+                  className="fill-[#059669] stroke-white dark:stroke-[#111827]"
                   strokeWidth="2"
                 />
                 <circle
                   cx={x}
                   cy={getY(d.expense)}
-                  r={isHovered ? 5.5 : 3.5}
-                  fill="#f43f5e"
-                  stroke="#0f172a"
+                  r={isHovered ? 4.5 : 2.5}
+                  className="fill-[#BE123C] stroke-white dark:stroke-[#111827]"
                   strokeWidth="2"
                 />
                 <circle
                   cx={x}
                   cy={getY(d.savings)}
-                  r={isHovered ? 5 : 3}
-                  fill="#818cf8"
-                  stroke="#0f172a"
+                  r={isHovered ? 4 : 2}
+                  className="fill-slate-500 dark:fill-slate-400 stroke-white dark:stroke-[#111827]"
                   strokeWidth="1.5"
                 />
 
@@ -229,9 +223,11 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
                 <text
                   x={x}
                   y={height - 12}
-                  fill={isHovered ? '#f8fafc' : '#94a3b8'}
-                  fontSize="11"
-                  fontWeight={isHovered ? '600' : '400'}
+                  className={`text-[11px] ${
+                    isHovered
+                      ? 'fill-slate-900 dark:fill-white font-semibold'
+                      : 'fill-slate-500 dark:fill-slate-400 font-normal'
+                  }`}
                   textAnchor="middle"
                 >
                   {d.monthLabel}
@@ -243,23 +239,21 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
 
         {/* Hover Tooltip Box */}
         {hoveredIdx !== null && data[hoveredIdx] && (
-          <div
-            className="absolute top-2 left-6 bg-slate-800/95 border border-slate-700/80 rounded-xl p-3 shadow-2xl backdrop-blur-md pointer-events-none z-20 min-w-[170px]"
-          >
-            <div className="text-xs font-bold text-white border-b border-slate-700 pb-1 mb-2">
+          <div className="absolute top-2 left-6 bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-3 shadow-md pointer-events-none z-20 min-w-[170px]">
+            <div className="text-xs font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-[#1F2937] pb-1 mb-2">
               {data[hoveredIdx].monthLabel} 2026
             </div>
             <div className="space-y-1 text-xs font-mono">
-              <div className="flex justify-between items-center text-emerald-400">
-                <span className="font-sans text-slate-300">הכנסה:</span>
+              <div className="flex justify-between items-center text-[#059669] dark:text-emerald-400">
+                <span className="font-sans text-slate-500 dark:text-slate-400">הכנסה:</span>
                 <span>₪{data[hoveredIdx].income.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between items-center text-rose-400">
-                <span className="font-sans text-slate-300">הוצאות:</span>
+              <div className="flex justify-between items-center text-[#BE123C] dark:text-rose-400">
+                <span className="font-sans text-slate-500 dark:text-slate-400">הוצאות:</span>
                 <span>₪{data[hoveredIdx].expense.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between items-center text-indigo-400 pt-1 border-t border-slate-700/60 font-semibold">
-                <span className="font-sans text-slate-300">חיסכון נטו:</span>
+              <div className="flex justify-between items-center text-slate-900 dark:text-white pt-1 border-t border-slate-100 dark:border-[#1F2937] font-semibold">
+                <span className="font-sans text-slate-500 dark:text-slate-400">חיסכון נטו:</span>
                 <span>₪{data[hoveredIdx].savings.toLocaleString()}</span>
               </div>
             </div>

@@ -98,6 +98,8 @@ export interface RecurringCommitment {
   status: 'active' | 'review' | 'cancelled';
   accountName: string;
   estimatedAnnualCost: number;
+  serviceDetails?: string;
+  billingDayInMonth?: number;
 }
 
 export interface AnomalyAlert {

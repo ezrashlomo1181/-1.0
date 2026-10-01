@@ -8,28 +8,23 @@ import {
 } from '../services/firebase';
 import {
   ShieldAlert,
-  Users,
   Search,
   CheckCircle,
   XCircle,
   Clock,
   Trash2,
   RefreshCw,
-  Lock,
   EyeOff,
-  AlertTriangle,
-  Calendar,
 } from 'lucide-react';
 
 interface AdminViewProps {
   currentUserEmail: string;
 }
 
-export const AdminView: React.FC<AdminViewProps> = ({ currentUserEmail }) => {
+export const AdminView: React.FC<AdminViewProps> = () => {
   const [users, setUsers] = useState<UserProfile[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [search, setSearch] = useState('');
-  const [selectedUser, setSelectedUser] = useState<UserProfile | null>(null);
   const [actionSuccess, setActionSuccess] = useState<string | null>(null);
 
   const fetchUsers = async () => {
@@ -117,23 +112,25 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUserEmail }) => {
   );
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+    <div className="space-y-6 pb-12 animate-in fade-in duration-200">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <ShieldAlert className="w-5 h-5 text-indigo-400" />
+          <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <span>ניהול משתמשים ומערכת (Admin)</span>
+            <span className="text-xs font-mono bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 px-2 py-0.5 rounded-md border border-indigo-200 dark:border-indigo-800">
+              Admin Console
+            </span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            מעקב אחר קיום חשבונות, סטטוסים ותקופות חסד למחיקה
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            מעקב אחר קיום חשבונות, סטטוסים תפעוליים ותקופות חסד למחיקה
           </p>
         </div>
 
         <button
           onClick={fetchUsers}
           disabled={isLoading}
-          className="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-medium border border-slate-700 transition-colors flex items-center gap-2 self-start sm:self-auto cursor-pointer"
+          className="px-3.5 py-1.5 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 text-xs font-medium border border-slate-200 dark:border-slate-700 transition-colors flex items-center gap-2 self-start sm:self-auto cursor-pointer"
         >
           <RefreshCw className={`w-3.5 h-3.5 ${isLoading ? 'animate-spin' : ''}`} />
           <span>רענן נתונים</span>
@@ -141,15 +138,15 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUserEmail }) => {
       </div>
 
       {/* Privacy Guarantee Box */}
-      <div className="bg-slate-900/90 border border-indigo-500/30 rounded-2xl p-4 shadow-xl flex items-start gap-3">
-        <div className="w-9 h-9 rounded-xl bg-indigo-500/15 border border-indigo-500/30 flex items-center justify-center text-indigo-400 flex-shrink-0 mt-0.5">
+      <div className="bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-200 dark:border-indigo-800/60 rounded-xl p-4 shadow-xs flex items-start gap-3">
+        <div className="w-8 h-8 rounded-lg bg-indigo-100 dark:bg-indigo-900/50 border border-indigo-300 dark:border-indigo-700/60 flex items-center justify-center text-indigo-700 dark:text-indigo-300 flex-shrink-0 mt-0.5">
           <EyeOff className="w-4 h-4" />
         </div>
-        <div className="text-xs text-slate-300 space-y-1">
-          <div className="font-bold text-white flex items-center gap-1.5">
+        <div className="text-xs text-slate-700 dark:text-slate-300 space-y-1">
+          <div className="font-bold text-slate-900 dark:text-white flex items-center gap-1.5">
             <span>מדיניות אפס-גישה פיננסית (Zero-Knowledge Financial Privacy)</span>
           </div>
-          <p className="text-slate-400 leading-relaxed text-[11px]">
+          <p className="text-slate-600 dark:text-slate-400 leading-relaxed text-[11px]">
             מערכת הניהול מאפשרת אך ורק מעקב אחר קיום החשבון ומצבו התפעולי. על פי ארכיטקטורת האבטחה
             וחוקי השרת (Firestore Rules), אין למנהל גישה לשום מידע פיננסי אישי (עסקאות, יתרות,
             תקציבים או מסמכים).
@@ -159,45 +156,45 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUserEmail }) => {
 
       {/* Success Alert */}
       {actionSuccess && (
-        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2">
-          <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+        <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-xs flex items-center gap-2">
+          <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
           <span>{actionSuccess}</span>
         </div>
       )}
 
       {/* Search and Table */}
-      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl overflow-hidden shadow-xl">
-        <div className="p-4 border-b border-slate-800 flex items-center justify-between gap-4">
+      <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl overflow-hidden shadow-xs transition-colors">
+        <div className="p-3.5 border-b border-slate-200 dark:border-[#1F2937] flex items-center justify-between gap-4">
           <div className="relative flex-1 max-w-sm">
-            <Search className="w-4 h-4 text-slate-500 absolute right-3 top-2.5" />
+            <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
             <input
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               placeholder="חיפוש לפי שם, דוא״ל או User ID..."
-              className="w-full bg-slate-950 border border-slate-800 rounded-xl pr-9 pl-3 py-1.5 text-xs text-white placeholder-slate-600 outline-none focus:border-indigo-500"
+              className="w-full bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] rounded-lg pr-9 pl-3 py-1.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-600 focus:ring-1 focus:ring-blue-600"
             />
           </div>
-          <span className="text-xs text-slate-400 font-mono">
-            {filtered.length} משתמשים רשומים
+          <span className="text-xs text-slate-500 dark:text-slate-400 font-mono">
+            {filtered.length} משתמשים
           </span>
         </div>
 
         {/* Table */}
         <div className="overflow-x-auto">
           <table className="w-full text-right text-xs">
-            <thead className="bg-slate-950/60 text-slate-400 font-semibold border-b border-slate-800">
+            <thead className="bg-slate-50 dark:bg-[#0B0F17] text-slate-600 dark:text-slate-400 font-semibold border-b border-slate-200 dark:border-[#1F2937]">
               <tr>
-                <th className="py-3 px-4">משתמש</th>
-                <th className="py-3 px-4">דוא״ל</th>
-                <th className="py-3 px-4">ספק הזדהות</th>
-                <th className="py-3 px-4">תאריך הרשמה</th>
-                <th className="py-3 px-4">כניסה אחרונה</th>
-                <th className="py-3 px-4">סטטוס</th>
-                <th className="py-3 px-4 text-left">פעולות ניהול</th>
+                <th className="py-2.5 px-4 font-medium">משתמש</th>
+                <th className="py-2.5 px-4 font-medium">דוא״ל</th>
+                <th className="py-2.5 px-4 font-medium">ספק הזדהות</th>
+                <th className="py-2.5 px-4 font-medium">תאריך הרשמה</th>
+                <th className="py-2.5 px-4 font-medium">כניסה אחרונה</th>
+                <th className="py-2.5 px-4 font-medium">סטטוס</th>
+                <th className="py-2.5 px-4 font-medium text-left">פעולות ניהול</th>
               </tr>
             </thead>
-            <tbody className="divide-y divide-slate-800/60">
+            <tbody className="divide-y divide-slate-100 dark:divide-[#1F2937]">
               {filtered.length === 0 ? (
                 <tr>
                   <td colSpan={7} className="text-center py-10 text-slate-500">
@@ -210,62 +207,62 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUserEmail }) => {
                   const isDeactivated = u.accountStatus === 'deactivated';
 
                   return (
-                    <tr key={u.id} className="hover:bg-slate-800/30 transition-colors">
-                      <td className="py-3.5 px-4 font-bold text-white">
+                    <tr key={u.id} className="hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors">
+                      <td className="py-3 px-4 font-bold text-slate-900 dark:text-white">
                         <div className="flex items-center gap-2">
                           <span>{u.name}</span>
                           {u.role === 'admin' && (
-                            <span className="text-[10px] bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 px-1.5 py-0.2 rounded font-mono font-bold">
+                            <span className="text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.2 rounded font-mono font-bold">
                               ADMIN
                             </span>
                           )}
                         </div>
-                        <div className="text-[10px] font-mono text-slate-500 font-normal mt-0.5">
+                        <div className="text-[10px] font-mono text-slate-400 dark:text-slate-500 font-normal mt-0.5">
                           UID: {u.id.substring(0, 10)}...
                         </div>
                       </td>
-                      <td className="py-3.5 px-4 font-mono text-slate-300" dir="ltr">
+                      <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-300" dir="ltr">
                         {u.email}
                       </td>
-                      <td className="py-3.5 px-4">
-                        <span className="capitalize px-2 py-0.5 rounded text-[11px] bg-slate-800 text-slate-300 font-mono">
+                      <td className="py-3 px-4">
+                        <span className="capitalize px-2 py-0.5 rounded-md text-[11px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-mono">
                           {u.authProvider.replace('.com', '')}
                         </span>
                       </td>
-                      <td className="py-3.5 px-4 text-slate-400 font-mono">
+                      <td className="py-3 px-4 text-slate-500 dark:text-slate-400 font-mono">
                         {u.createdAt ? u.createdAt.split('T')[0] : '—'}
                       </td>
-                      <td className="py-3.5 px-4 text-slate-400 font-mono">
+                      <td className="py-3 px-4 text-slate-500 dark:text-slate-400 font-mono">
                         {u.lastLogin ? u.lastLogin.split('T')[0] : '—'}
                       </td>
-                      <td className="py-3.5 px-4">
+                      <td className="py-3 px-4">
                         {isPendingDeletion ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-rose-500/15 text-rose-300 border border-rose-500/30 font-medium">
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-rose-50 dark:bg-rose-950/40 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800 font-medium">
                             <Clock className="w-3 h-3" />
-                            <span>מיועד למחיקה (חסד)</span>
+                            <span>מיועד למחיקה</span>
                           </span>
                         ) : isDeactivated ? (
-                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-amber-500/15 text-amber-300 border border-amber-500/30 font-medium">
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 font-medium">
                             <XCircle className="w-3 h-3" />
                             <span>מושבת</span>
                           </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 font-medium">
+                          <span className="inline-flex items-center gap-1 text-[11px] px-2 py-0.5 rounded-md bg-emerald-50 dark:bg-emerald-950/40 text-emerald-800 dark:text-emerald-300 border border-emerald-200 dark:border-emerald-800 font-medium">
                             <CheckCircle className="w-3 h-3" />
                             <span>פעיל</span>
                           </span>
                         )}
                       </td>
-                      <td className="py-3.5 px-4 text-left">
+                      <td className="py-3 px-4 text-left">
                         <div className="flex items-center justify-end gap-1.5">
                           {/* Toggle Active / Deactivate */}
                           <button
                             type="button"
                             onClick={() => handleToggleStatus(u)}
-                            className={`px-2.5 py-1 rounded-lg text-[11px] font-semibold transition-colors border ${
+                            className={`px-2.5 py-1 rounded-md text-[11px] font-semibold transition-colors border cursor-pointer ${
                               isDeactivated
-                                ? 'bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-300 border-emerald-500/30'
-                                : 'bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border-amber-500/30'
+                                ? 'bg-emerald-50 hover:bg-emerald-100 dark:bg-emerald-950/30 text-emerald-800 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800'
+                                : 'bg-amber-50 hover:bg-amber-100 dark:bg-amber-950/30 text-amber-800 dark:text-amber-300 border-amber-200 dark:border-amber-800'
                             }`}
                           >
                             {isDeactivated ? 'הפעל חשבון' : 'השבת חשבון'}
@@ -276,7 +273,7 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUserEmail }) => {
                             <button
                               type="button"
                               onClick={() => handleCancelDeletion(u)}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition-colors"
+                              className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-200 border border-slate-200 dark:border-slate-700 transition-colors cursor-pointer"
                             >
                               בטל מחיקה
                             </button>
@@ -284,11 +281,11 @@ export const AdminView: React.FC<AdminViewProps> = ({ currentUserEmail }) => {
                             <button
                               type="button"
                               onClick={() => handleInitiateDeletion(u)}
-                              className="px-2.5 py-1 rounded-lg text-[11px] font-semibold bg-rose-500/10 hover:bg-rose-500/20 text-rose-300 border border-rose-500/20 transition-colors flex items-center gap-1"
+                              className="px-2.5 py-1 rounded-md text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 dark:bg-rose-950/30 text-rose-800 dark:text-rose-300 border border-rose-200 dark:border-rose-800 transition-colors flex items-center gap-1 cursor-pointer"
                               title="תזמן מחיקה (30 ימי חסד)"
                             >
                               <Trash2 className="w-3 h-3" />
-                              <span>מחיקה (30 יום)</span>
+                              <span>מחיקה</span>
                             </button>
                           )}
                         </div>

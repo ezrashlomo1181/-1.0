@@ -677,12 +677,12 @@ export default function App() {
   const isAdminUser = userProfile?.role === 'admin';
 
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans" dir="rtl">
+    <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] dark:bg-[#0B0F17] dark:text-slate-100 flex flex-col font-sans transition-colors duration-150" dir="rtl">
       {/* 30-Day Account Deletion Grace Period Banner (#6) */}
       {userProfile?.deletionStatus === 'pending_deletion' && (
-        <div className="bg-rose-500/20 border-b border-rose-500/40 text-rose-200 px-4 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs z-50">
+        <div className="bg-rose-50 dark:bg-rose-950/40 border-b border-rose-200 dark:border-rose-800/60 text-rose-900 dark:text-rose-200 px-4 py-2.5 flex flex-col sm:flex-row items-center justify-between gap-3 text-xs z-50">
           <div className="flex items-center gap-2">
-            <AlertTriangle className="w-4 h-4 text-rose-400 flex-shrink-0" />
+            <AlertTriangle className="w-4 h-4 text-rose-600 dark:text-rose-400 flex-shrink-0" />
             <span>
               <strong>חשבונך מתוזמן למחיקה ב-{userProfile.scheduledDeletionDate?.split('T')[0] || 'עוד 30 יום'}.</strong>{' '}
               במהלך 30 ימי החסד כל הנתונים הפיננסיים שלך נשמרים. באפשרותך לבטל את המחיקה בכל רגע.
@@ -690,7 +690,7 @@ export default function App() {
           </div>
           <button
             onClick={handleCancelGraceDeletion}
-            className="px-3.5 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs transition-colors shadow-sm cursor-pointer whitespace-nowrap"
+            className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 font-semibold text-xs border border-slate-800 dark:border-slate-700 transition-colors shadow-xs cursor-pointer whitespace-nowrap"
           >
             בטל בקשת מחיקה
           </button>

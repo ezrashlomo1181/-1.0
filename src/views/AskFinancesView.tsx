@@ -4,9 +4,7 @@ import {
   BotMessageSquare,
   Send,
   Sparkles,
-  HelpCircle,
   Calculator,
-  ArrowDownLeft,
   ChevronDown,
   ChevronUp,
 } from 'lucide-react';
@@ -32,18 +30,17 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
   transactions,
   accounts,
   goals,
-  investments,
 }) => {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: 'welcome',
       sender: 'assistant',
-      text: 'שלום! אני הבינה הפיננסית של «מצפן פיננסי». כל תשובה שאספק מבוססת באופן מוחלט ובלעדי על הנתונים האמיתיים שיובאו לחשבונך. שאל אותי כל שאלה לגבי הוצאות, חסכונות, מגמות או תוכניות עתידיות.',
+      text: 'שלום! אני העוזר הפיננסי האישי של «מצפן פיננסי». כל תשובה שאספק מבוססת באופן בלעדי על הנתונים האמיתיים שיובאו לחשבונך. שאל אותי כל שאלה לגבי הוצאות, חסכונות, מגמות או תוכניות עתידיות.',
       calculationExplanation:
-        'המערכת מנתחת נתוני אמת של עסקאות, חשבונות בנק, כרטיסי אשראי והשקעות. אין שימוש בהערכות שרירותיות.',
+        'המערכת מנתחת נתוני אמת של עסקאות, חשבונות בנק, כרטיסי אשראי והשקעות ללא ניחושים.',
       keyMetrics: [
         { label: 'עסקאות זמינות לניתוח', value: `${transactions.length}` },
-        { label: 'חשבונות מחוברים', value: `${accounts.length}` },
+        { label: 'חשבונות מקושרים', value: `${accounts.length}` },
       ],
       suggestedFollowUps: [
         'כמה הוצאתי על אוכל ומסעדות בחצי השנה האחרונה?',
@@ -63,7 +60,6 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
     'כמה אני חוסך בממוצע?',
     'מה היה החודש הכי יקר?',
     'כמה כסף נזיל יש לי?',
-    'מה השתנה במצב הפיננסי שלי מאז ינואר?',
     'אם אמשיך בקצב הנוכחי, כמה יהיה לי בעוד 3 שנים?',
   ];
 
@@ -82,7 +78,6 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
     setIsLoading(true);
 
     try {
-      // Build financial context
       const financialContext = {
         accountsCount: accounts.length,
         totalBalance: accounts.reduce((s, a) => s + a.balance, 0),
@@ -121,7 +116,6 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
 
       setMessages((prev) => [...prev, botMsg]);
     } catch (err) {
-      // Deterministic fallback response directly from loaded data
       let fallbackText = '';
       let explanation = '';
       let metrics: { label: string; value: string }[] = [];
@@ -179,7 +173,7 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
           calculationExplanation: explanation,
           keyMetrics: metrics,
           suggestedFollowUps: [
-            'כמה הוצאתי על קניות?',
+            'כמה הוצאתי על קניות החודש?',
             'מה הסטטוס של יעד קרן החירום שלי?',
           ],
         },
@@ -196,21 +190,19 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+    <div className="space-y-6 pb-12 animate-in fade-in duration-200">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
-            <BotMessageSquare className="w-5 h-5 text-emerald-400" />
+          <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <span>שאל את הכספים שלי</span>
+            <span className="text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
+              בינה פיננסית שקופה
+            </span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
-            עוזר פיננסי אישי בשפה חופשית — 100% שקוף, מבוסס נתוני אמת עם אפשרות «איך חישבנו?»
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            מענה בשפה חופשית המבוסס במלואו על נתוני האמת שלך, עם שקיפות מלאה של החישוב
           </p>
-        </div>
-
-        <div className="bg-slate-800/80 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-slate-300 font-mono">
-          מודל: בינה פיננסית שקופה
         </div>
       </div>
 
@@ -220,7 +212,7 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
           <button
             key={i}
             onClick={() => handleSendMessage(q)}
-            className="px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 hover:border-emerald-500/50 text-slate-300 text-xs transition-colors hover:text-white"
+            className="px-3 py-1.5 rounded-lg bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] text-slate-700 dark:text-slate-300 hover:bg-slate-50 dark:hover:bg-slate-800 hover:text-slate-900 dark:hover:text-white text-xs transition-colors shadow-xs cursor-pointer"
           >
             {q}
           </button>
@@ -228,7 +220,7 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
       </div>
 
       {/* Chat Messages Container */}
-      <div className="bg-slate-900/90 rounded-2xl border border-slate-800/80 p-5 shadow-xl min-h-[460px] flex flex-col justify-between space-y-4">
+      <div className="bg-white dark:bg-[#111827] rounded-xl border border-slate-200 dark:border-[#1F2937] p-5 shadow-xs min-h-[460px] flex flex-col justify-between space-y-4 transition-colors">
         <div className="space-y-4 overflow-y-auto max-h-[520px] pr-1">
           {messages.map((m) => {
             const isUser = m.sender === 'user';
@@ -238,21 +230,21 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
                 className={`flex flex-col ${isUser ? 'items-start' : 'items-end'}`}
               >
                 <div
-                  className={`max-w-2xl rounded-2xl p-4 text-xs leading-relaxed space-y-3 ${
+                  className={`max-w-2xl rounded-xl p-4 text-xs leading-relaxed space-y-3 ${
                     isUser
-                      ? 'bg-emerald-600 text-white font-medium rounded-br-xs'
-                      : 'bg-slate-950 border border-slate-800 text-slate-200 rounded-bl-xs shadow-md'
+                      ? 'bg-slate-900 text-white dark:bg-slate-800 dark:text-white font-medium rounded-br-xs border border-slate-800 dark:border-[#1F2937]'
+                      : 'bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] text-slate-800 dark:text-slate-200 rounded-bl-xs shadow-xs'
                   }`}
                 >
-                  <p className="text-sm whitespace-pre-line">{m.text}</p>
+                  <p className="text-xs sm:text-sm whitespace-pre-line leading-relaxed">{m.text}</p>
 
-                  {/* Key Metrics Chips */}
+                  {/* Key Metrics */}
                   {m.keyMetrics && m.keyMetrics.length > 0 && (
-                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-800/80">
+                    <div className="grid grid-cols-2 gap-2 pt-2 border-t border-slate-200 dark:border-[#1F2937]">
                       {m.keyMetrics.map((km, idx) => (
-                        <div key={idx} className="bg-slate-900/90 p-2 rounded-lg border border-slate-800">
-                          <span className="text-[10px] text-slate-400 block">{km.label}</span>
-                          <span className="text-xs font-bold text-emerald-400 font-mono">
+                        <div key={idx} className="bg-white dark:bg-[#111827] p-2 rounded-lg border border-slate-200 dark:border-[#1F2937]">
+                          <span className="text-[10px] text-slate-500 dark:text-slate-400 block">{km.label}</span>
+                          <span className="text-xs font-bold text-[#059669] dark:text-emerald-400 font-mono">
                             {km.value}
                           </span>
                         </div>
@@ -260,12 +252,12 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
                     </div>
                   )}
 
-                  {/* "איך חישבנו?" (How we calculated this) Toggle */}
+                  {/* "איך חישבנו?" (Calculation Disclosure) */}
                   {m.calculationExplanation && !isUser && (
-                    <div className="pt-2 border-t border-slate-800/80">
+                    <div className="pt-2 border-t border-slate-200 dark:border-[#1F2937]">
                       <button
                         onClick={() => toggleCalc(m.id)}
-                        className="inline-flex items-center gap-1.5 text-[11px] text-cyan-400 hover:text-cyan-300 font-semibold"
+                        className="inline-flex items-center gap-1.5 text-[11px] text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 font-semibold cursor-pointer"
                       >
                         <Calculator className="w-3.5 h-3.5" />
                         <span>איך חישבנו את זה?</span>
@@ -277,7 +269,7 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
                       </button>
 
                       {m.showCalc && (
-                        <div className="mt-2 p-2.5 rounded-lg bg-slate-900/90 border border-cyan-800/40 text-[11px] text-cyan-200 leading-relaxed font-mono">
+                        <div className="mt-2 p-2.5 rounded-lg bg-blue-50/70 dark:bg-[#111827] border border-blue-200 dark:border-blue-900/40 text-[11px] text-blue-950 dark:text-blue-200 leading-relaxed font-mono">
                           {m.calculationExplanation}
                         </div>
                       )}
@@ -286,8 +278,8 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
 
                   {/* Follow-up suggestions */}
                   {m.suggestedFollowUps && m.suggestedFollowUps.length > 0 && !isUser && (
-                    <div className="pt-2 border-t border-slate-800/60 space-y-1.5">
-                      <span className="text-[10px] text-slate-500 font-semibold block">
+                    <div className="pt-2 border-t border-slate-200 dark:border-[#1F2937] space-y-1.5">
+                      <span className="text-[10px] text-slate-500 dark:text-slate-400 font-semibold block">
                         שאלות המשך מומלצות:
                       </span>
                       <div className="flex flex-wrap gap-1.5">
@@ -295,7 +287,7 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
                           <button
                             key={fIdx}
                             onClick={() => handleSendMessage(fu)}
-                            className="text-[11px] px-2 py-1 rounded bg-slate-900 text-slate-300 hover:text-white border border-slate-800 hover:border-slate-700 transition-colors"
+                            className="text-[11px] px-2 py-1 rounded-md bg-white dark:bg-[#111827] text-slate-700 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white border border-slate-200 dark:border-[#1F2937] hover:border-slate-300 dark:hover:border-slate-700 transition-colors cursor-pointer"
                           >
                             {fu}
                           </button>
@@ -309,15 +301,15 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
           })}
 
           {isLoading && (
-            <div className="flex items-center gap-2 text-xs text-slate-400 animate-pulse p-2">
-              <Sparkles className="w-4 h-4 text-emerald-400" />
+            <div className="flex items-center gap-2 text-xs text-slate-500 dark:text-slate-400 animate-pulse p-2">
+              <Sparkles className="w-4 h-4 text-blue-600 dark:text-blue-400" />
               <span>המערכת מנתחת את נתוני התנועות והחשבונות שלך...</span>
             </div>
           )}
         </div>
 
         {/* Query Input Bar */}
-        <div className="pt-3 border-t border-slate-800 flex items-center gap-2">
+        <div className="pt-3 border-t border-slate-200 dark:border-[#1F2937] flex items-center gap-2">
           <input
             type="text"
             value={inputQuery}
@@ -326,12 +318,12 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
               if (e.key === 'Enter') handleSendMessage();
             }}
             placeholder="שאל כל שאלה פיננסית (למשל: כמה הוצאתי על מסעדות באוגוסט?)..."
-            className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-emerald-500"
+            className="flex-1 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] rounded-lg px-4 py-2.5 text-xs text-slate-900 dark:text-white placeholder-slate-400 dark:placeholder-slate-500 focus:outline-none focus:border-blue-600 dark:focus:border-blue-500"
           />
           <button
             onClick={() => handleSendMessage()}
             disabled={isLoading || !inputQuery.trim()}
-            className="px-4 py-2.5 rounded-xl bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white font-semibold text-xs flex items-center gap-1.5 transition-colors shadow-lg shadow-emerald-900/30"
+            className="px-4 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800 dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 disabled:opacity-40 text-white font-medium text-xs flex items-center gap-1.5 transition-colors shadow-xs cursor-pointer"
           >
             <span>שלח</span>
             <Send className="w-3.5 h-3.5" />

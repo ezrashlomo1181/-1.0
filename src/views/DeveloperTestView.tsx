@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { UserProfile, Transaction, Account, BudgetCategory, FinancialGoal } from '../types/financial';
-import { areTestingToolsEnabled, TESTING_TOOLS_CONFIG } from '../config/testingConfig';
+import { UserProfile } from '../types/financial';
+import { areTestingToolsEnabled } from '../config/testingConfig';
 import {
   FlaskConical,
   Users,
@@ -10,14 +10,8 @@ import {
   ShieldCheck,
   CheckCircle,
   AlertTriangle,
-  ArrowRight,
-  Download,
-  UploadCloud,
   FileSpreadsheet,
-  FileText,
-  UserCheck,
   Lock,
-  Sparkles,
 } from 'lucide-react';
 
 interface DeveloperTestViewProps {
@@ -34,12 +28,11 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
   onInjectTestFile,
 }) => {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
-  const [activeTestUser, setActiveTestUser] = useState<string>(currentUser?.id || 'real_user');
 
   if (!areTestingToolsEnabled()) {
     return (
-      <div className="p-8 text-center text-slate-400">
-        <Lock className="w-8 h-8 mx-auto mb-2 text-slate-600" />
+      <div className="p-8 text-center text-slate-500 dark:text-slate-400">
+        <Lock className="w-8 h-8 mx-auto mb-2 text-slate-400 dark:text-slate-600" />
         <p className="text-sm">כלי הפיתוח והבדיקות מושבתים בסביבת ייצור זו.</p>
       </div>
     );
@@ -180,74 +173,69 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
   // Generate Duplicate File (same name as previous)
   const handleGenerateDuplicateCSV = () => {
     const rows = [
-      'תאריך,בית עסק,סכום',
-      '01/09/2026,שופרסל דיל,-740',
+      'תאריך,תיאור,סכום',
+      '01/09/2026,משכורת חודשית,16500',
       '03/09/2026,שכר דירה,-4800',
     ];
     const file = createMockCSVFile('bank_hapoalim_statement_12m.csv', rows.join('\n'));
     onInjectTestFile(file);
-    setSuccessMessage('נוצר קובץ כפול (אותו שם וגודל) לבדיקת מנגנון Duplicate Detection!');
+    setSuccessMessage('הוזן קובץ בעל שם זהה לבדיקת זיהוי כפילויות (Duplicate Alert)!');
     setTimeout(() => setSuccessMessage(null), 4000);
   };
 
-  // Switch demo user session
   const handleSelectDemoUser = (user: UserProfile) => {
-    setActiveTestUser(user.id);
     onSwitchUser(user);
-    setSuccessMessage(`סביבת העבודה עברה אל: ${user.name}`);
-    setTimeout(() => setSuccessMessage(null), 4000);
+    setSuccessMessage(`הוחלף משתמש פעיל בהצלחה ל: ${user.name}`);
+    setTimeout(() => setSuccessMessage(null), 3000);
   };
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+    <div className="space-y-6 pb-12 animate-in fade-in duration-200">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
           <div className="flex items-center gap-2">
-            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30 text-[11px] font-mono font-bold">
-              DEVELOPER & TESTING TOOLS
-            </span>
-            <span className="text-xs text-slate-500 font-mono">
-              CONFIG: TESTING_TOOLS = ENABLED
+            <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800 text-[11px] font-mono font-bold">
+              DEV & TEST PANEL
             </span>
           </div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2 mt-1">
-            <FlaskConical className="w-5 h-5 text-amber-400" />
+          <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2 mt-1">
+            <FlaskConical className="w-4 h-4 text-amber-600 dark:text-amber-400" />
             <span>סביבת בדיקות ופיתוח Multi-User</span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             יצירת משתמשי בדיקה, הזרקת קבצי סימולציה, בדיקת בידוד נתונים ואיפוס סביבת בדיקות
           </p>
         </div>
 
         {/* Notice of Production Safety */}
-        <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl px-3 py-2 text-xs text-emerald-300 flex items-center gap-2">
-          <ShieldCheck className="w-4 h-4 text-emerald-400" />
+        <div className="bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 rounded-lg px-3 py-1.5 text-xs text-emerald-800 dark:text-emerald-300 flex items-center gap-1.5 self-start sm:self-auto">
+          <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
           <span>מוגן: איפוס משפיע אך ורק על משתמשי Test Data</span>
         </div>
       </div>
 
       {/* Success Notification */}
       {successMessage && (
-        <div className="p-3.5 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs flex items-center gap-2 animate-in fade-in">
-          <CheckCircle className="w-4 h-4 text-emerald-400 flex-shrink-0" />
+        <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800 text-emerald-900 dark:text-emerald-200 text-xs flex items-center gap-2 animate-in fade-in">
+          <CheckCircle className="w-4 h-4 text-emerald-600 dark:text-emerald-400 flex-shrink-0" />
           <span>{successMessage}</span>
         </div>
       )}
 
       {/* 1. MULTI-USER ISOLATION TESTING (Section 15, 16) */}
-      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+      <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs space-y-4 transition-colors">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <Users className="w-4 h-4 text-indigo-400" />
+            <h3 className="text-sm font-bold text-[#0F172A] dark:text-white flex items-center gap-2">
+              <Users className="w-4 h-4 text-slate-700 dark:text-slate-300" />
               <span>משתמשי Demo ובדיקת בידוד הדדית (Multi-User Isolation)</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
               החלף משתמש פעיל כדי לוודא שדשבורד, עסקאות, חשבונות וקבצים של משתמש א' מבודדים לחלוטין ממשתמש ב'
             </p>
           </div>
-          <span className="text-xs font-mono text-indigo-300 bg-indigo-500/15 px-2.5 py-1 rounded-lg border border-indigo-500/30 font-bold">
+          <span className="text-xs font-mono text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 font-medium">
             משתמש נוכחי: {currentUser?.name || 'אורח'}
           </span>
         </div>
@@ -261,39 +249,39 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
                 key={user.id}
                 className={`p-4 rounded-xl border transition-all text-xs flex flex-col justify-between gap-3 ${
                   isCurrent
-                    ? 'bg-indigo-500/15 border-indigo-500/60 shadow-lg'
-                    : 'bg-slate-950/70 border-slate-800 hover:border-slate-700'
+                    ? 'bg-slate-100 dark:bg-slate-800/80 border-slate-400 dark:border-slate-600'
+                    : 'bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] hover:border-slate-300 dark:hover:border-slate-700'
                 }`}
               >
-                <div className="space-y-1.5">
+                <div className="space-y-1">
                   <div className="flex items-center justify-between">
-                    <span className="font-bold text-white text-sm">{user.name.split('(')[0]}</span>
-                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                    <span className="font-bold text-[#0F172A] dark:text-white text-xs">{user.name.split('(')[0]}</span>
+                    <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-amber-50 dark:bg-amber-950/60 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800">
                       DEMO
                     </span>
                   </div>
-                  <div className="text-[11px] font-mono text-slate-400" dir="ltr">
+                  <div className="text-[11px] font-mono text-slate-500 dark:text-slate-400" dir="ltr">
                     {user.email}
                   </div>
-                  <p className="text-[11px] text-slate-400 leading-relaxed pt-1">
+                  <p className="text-[11px] text-slate-600 dark:text-slate-400 leading-relaxed pt-1">
                     {user.description}
                   </p>
                 </div>
 
-                <div className="pt-2 border-t border-slate-800/80 flex items-center justify-between">
-                  <span className="text-[10px] text-emerald-400 font-mono">
+                <div className="pt-2 border-t border-slate-200 dark:border-[#1F2937] flex items-center justify-between">
+                  <span className="text-[10px] text-[#059669] dark:text-emerald-400 font-mono">
                     פרופיל: {user.financialProfileCompletion}%
                   </span>
                   <button
                     type="button"
                     onClick={() => handleSelectDemoUser(user)}
-                    className={`px-3 py-1.5 rounded-lg font-bold text-xs transition-colors cursor-pointer ${
+                    className={`px-3 py-1.5 rounded-lg font-medium text-xs transition-colors cursor-pointer ${
                       isCurrent
-                        ? 'bg-indigo-600 text-white shadow-sm'
-                        : 'bg-slate-800 hover:bg-slate-700 text-slate-300'
+                        ? 'bg-slate-900 text-white dark:bg-slate-700 shadow-xs'
+                        : 'bg-white hover:bg-slate-100 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700'
                     }`}
                   >
-                    {isCurrent ? 'משתמש פעיל כעת' : 'התחבר כמשתמש זה'}
+                    {isCurrent ? 'פעיל כעת' : 'התחבר כמשתמש זה'}
                   </button>
                 </div>
               </div>
@@ -303,14 +291,14 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
       </div>
 
       {/* 2. TEST FILE GENERATOR (Section 18) */}
-      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+      <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs space-y-4 transition-colors">
         <div>
-          <h3 className="text-base font-bold text-white flex items-center gap-2">
-            <FileCode className="w-4 h-4 text-emerald-400" />
+          <h3 className="text-sm font-bold text-[#0F172A] dark:text-white flex items-center gap-2">
+            <FileCode className="w-4 h-4 text-slate-700 dark:text-slate-300" />
             <span>מחולל קבצי בדיקה וסימולציה (Test File Generator)</span>
           </h3>
-          <p className="text-xs text-slate-400 mt-0.5">
-            הזרק קבצים מדומים ישירות למרכז הנתונים כדי לבדוק את תור ההעלאה (Queue), זיהוי כפילויות, עומסים ואי-ודאות
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+            הזרק קבצים מדומים ישירות למרכז הנתונים כדי לבדוק את תור ההעלאה, זיהוי כפילויות ואי-ודאות
           </p>
         </div>
 
@@ -319,13 +307,13 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
           <button
             type="button"
             onClick={handleGenerateBankCSV}
-            className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-emerald-500/50 transition-all text-right group cursor-pointer"
+            className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] hover:border-slate-400 dark:hover:border-slate-600 transition-all text-right group cursor-pointer"
           >
-            <div className="flex items-center gap-2 text-emerald-400 font-bold text-xs mb-1">
+            <div className="flex items-center gap-2 text-[#059669] dark:text-emerald-400 font-bold text-xs mb-1">
               <FileSpreadsheet className="w-4 h-4" />
               <span>תדפיס בנק CSV (12 חודשים)</span>
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
               משכורת חודשית, שכר דירה, סופר והוראות קבע.
             </p>
           </button>
@@ -334,13 +322,13 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
           <button
             type="button"
             onClick={handleGenerateCardCSV}
-            className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-cyan-500/50 transition-all text-right group cursor-pointer"
+            className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] hover:border-blue-500 dark:hover:border-blue-600 transition-all text-right group cursor-pointer"
           >
-            <div className="flex items-center gap-2 text-cyan-400 font-bold text-xs mb-1">
+            <div className="flex items-center gap-2 text-blue-600 dark:text-blue-400 font-bold text-xs mb-1">
               <FileSpreadsheet className="w-4 h-4" />
               <span>פירוט כרטיס אשראי CSV</span>
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
               עסקאות מרובות בבתי עסק שונים, דלק וביגוד.
             </p>
           </button>
@@ -349,13 +337,13 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
           <button
             type="button"
             onClick={handleGenerateLargeCSV}
-            className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-indigo-500/50 transition-all text-right group cursor-pointer"
+            className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] hover:border-slate-400 dark:hover:border-slate-600 transition-all text-right group cursor-pointer"
           >
-            <div className="flex items-center gap-2 text-indigo-400 font-bold text-xs mb-1">
+            <div className="flex items-center gap-2 text-slate-700 dark:text-slate-300 font-bold text-xs mb-1">
               <Database className="w-4 h-4" />
               <span>קובץ ענק (350+ עסקאות)</span>
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
               בדיקת ביצועי עיבוד תור קבצים כבדים ורינדור.
             </p>
           </button>
@@ -364,13 +352,13 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
           <button
             type="button"
             onClick={handleGenerateAmbiguousCSV}
-            className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-amber-500/50 transition-all text-right group cursor-pointer"
+            className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] hover:border-amber-500 dark:hover:border-amber-600 transition-all text-right group cursor-pointer"
           >
-            <div className="flex items-center gap-2 text-amber-400 font-bold text-xs mb-1">
+            <div className="flex items-center gap-2 text-amber-700 dark:text-amber-400 font-bold text-xs mb-1">
               <AlertTriangle className="w-4 h-4" />
-              <span>קובץ עם אי-ודאות (לבדיקת אימות)</span>
+              <span>קובץ עם אי-ודאות (אימות)</span>
             </div>
-            <p className="text-[11px] text-slate-400">
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
               עסקאות ללא בית עסק ברור המפעילות את תור האימות.
             </p>
           </button>
@@ -379,40 +367,40 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
           <button
             type="button"
             onClick={handleGenerateDuplicateCSV}
-            className="p-3.5 rounded-xl bg-slate-950/70 border border-slate-800 hover:border-rose-500/50 transition-all text-right group cursor-pointer"
+            className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] hover:border-rose-500 dark:hover:border-rose-600 transition-all text-right group cursor-pointer"
           >
-            <div className="flex items-center gap-2 text-rose-400 font-bold text-xs mb-1">
+            <div className="flex items-center gap-2 text-[#BE123C] dark:text-rose-400 font-bold text-xs mb-1">
               <RotateCcw className="w-4 h-4" />
-              <span>קובץ כפול (Duplicate Detection)</span>
+              <span>קובץ כפול (Duplicate Alert)</span>
             </div>
-            <p className="text-[11px] text-slate-400">
-              בדיקת התרעת כפילות ובחירת דלג / החלף / בדוק.
+            <p className="text-[11px] text-slate-500 dark:text-slate-400">
+              בדיקת התרעת כפילות ובחירת דלג / החלף.
             </p>
           </button>
         </div>
       </div>
 
-      {/* 3. TEST DATA RESET (Section 17, 20) */}
-      <div className="bg-slate-900/90 border border-slate-800/80 rounded-2xl p-5 shadow-xl space-y-4">
+      {/* 3. TEST DATA RESET */}
+      <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs space-y-4 transition-colors">
         <div className="flex items-center justify-between">
           <div>
-            <h3 className="text-base font-bold text-white flex items-center gap-2">
-              <RotateCcw className="w-4 h-4 text-rose-400" />
+            <h3 className="text-sm font-bold text-[#0F172A] dark:text-white flex items-center gap-2">
+              <RotateCcw className="w-4 h-4 text-rose-600 dark:text-rose-400" />
               <span>איפוס סביבת בדיקות (Reset Test Environment)</span>
             </h3>
-            <p className="text-xs text-slate-400 mt-0.5">
-              מחיקת כל משתמשי ה-Demo, קבצי הבדיקה והעסקאות הפיקטיביות כדי להתחיל בדיקה מחדש מסביבה נקייה
+            <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
+              מחיקת כל משתמשי ה-Demo וקבצי הבדיקה להתחלה מחדש מסביבה נקייה
             </p>
           </div>
         </div>
 
-        <div className="p-4 rounded-xl bg-slate-950 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
-          <div className="text-xs text-slate-300 space-y-1">
-            <div className="font-bold text-amber-300 flex items-center gap-1.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
+        <div className="p-4 rounded-xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="text-xs text-slate-600 dark:text-slate-400 space-y-1">
+            <div className="font-bold text-amber-800 dark:text-amber-300 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 dark:text-emerald-400" />
               <span>עקרון בטיחות מחמיר (Zero Production Danger)</span>
             </div>
-            <p className="text-slate-400 text-[11px] leading-relaxed">
+            <p className="text-slate-500 dark:text-slate-400 text-[11px] leading-relaxed">
               מנגנון האיפוס מסנן ומוחק אך ורק רשומות המזוהות כ-Test Data (`isDemoUser === true`).
               הוא חסום לחלוטין מפגיעה בחשבונות משתמשים אמיתיים או במנהל המערכת.
             </p>
@@ -421,10 +409,10 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
           <button
             type="button"
             onClick={onResetTestEnvironment}
-            className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-white font-bold text-xs transition-colors shadow-md flex items-center gap-2 cursor-pointer self-start sm:self-auto whitespace-nowrap"
+            className="px-4 py-2 rounded-lg bg-rose-700 hover:bg-rose-800 text-white font-medium text-xs transition-colors shadow-xs flex items-center gap-2 cursor-pointer self-start sm:self-auto whitespace-nowrap"
           >
             <RotateCcw className="w-4 h-4" />
-            <span>אפס את כל נתוני הבדיקה (Reset Test)</span>
+            <span>אפס את כל נתוני הבדיקה</span>
           </button>
         </div>
       </div>

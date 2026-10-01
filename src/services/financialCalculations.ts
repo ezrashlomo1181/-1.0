@@ -36,19 +36,19 @@ export interface CategorySummary {
 }
 
 const CATEGORY_COLORS: Record<string, string> = {
-  'דיור': '#3b82f6', // blue
-  'מזון וסופר': '#10b981', // emerald
-  'מסעדות ומשלוחים': '#f59e0b', // amber
-  'תחבורה': '#8b5cf6', // purple
-  'קניות': '#ec4899', // pink
-  'בילויים ופנאי': '#06b6d4', // cyan
-  'בריאות': '#14b8a6', // teal
-  'ביטוחים': '#6366f1', // indigo
-  'חשבונות': '#64748b', // slate
-  'מנויים': '#a855f7', // purple-500
-  'הלוואות והתחייבויות': '#ef4444', // red
+  'דיור': '#2563eb', // solid banking navy/blue
+  'מזון וסופר': '#059669', // forest emerald
+  'מסעדות ומשלוחים': '#d97706', // muted amber
+  'תחבורה': '#6366f1', // indigo
+  'קניות': '#9333ea', // muted purple
+  'בילויים ופנאי': '#0284c7', // classic sky/blue (no cyan glow)
+  'בריאות': '#0f766e', // deep teal
+  'ביטוחים': '#475569', // slate
+  'חשבונות': '#64748b', // classic slate
+  'מנויים': '#7c3aed', // muted purple
+  'הלוואות והתחייבויות': '#be123c', // professional bordeaux rose
   'אחר': '#94a3b8', // light slate
-  'הכנסות': '#22c55e', // green
+  'הכנסות': '#059669', // forest emerald
 };
 
 export function getCategoryColor(category: string): string {

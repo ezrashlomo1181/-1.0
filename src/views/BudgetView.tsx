@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { BudgetCategory, Transaction } from '../types/financial';
 import {
-  PieChart,
   Plus,
   AlertTriangle,
   CheckCircle2,
@@ -10,6 +9,7 @@ import {
   Edit2,
   Save,
   X,
+  FileSearch,
 } from 'lucide-react';
 
 interface BudgetViewProps {
@@ -71,24 +71,24 @@ export const BudgetView: React.FC<BudgetViewProps> = ({
   };
 
   return (
-    <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+    <div className="space-y-6 pb-12 animate-in fade-in duration-200">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div>
-          <h2 className="text-xl font-bold text-white flex items-center gap-2">
+          <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <span>ניהול ובקרת תקציב</span>
-            <span className="text-xs font-mono bg-slate-800 text-slate-300 px-2 py-0.5 rounded-full border border-slate-700">
+            <span className="text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
               ספטמבר 2026
             </span>
           </h2>
-          <p className="text-xs text-slate-400 mt-1">
+          <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
             מעקב תכנון מול ביצוע, הצעות מבוססות היסטוריה, והתראות חריגה
           </p>
         </div>
 
         <button
           onClick={() => setShowNewCategory(true)}
-          className="inline-flex items-center gap-1.5 px-3.5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-white font-semibold text-xs transition-colors shadow-lg shadow-emerald-900/30"
+          className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 font-medium text-xs transition-colors shadow-xs cursor-pointer self-start sm:self-auto"
         >
           <Plus className="w-4 h-4" />
           <span>הוסף קטגוריית תקציב</span>
@@ -96,43 +96,45 @@ export const BudgetView: React.FC<BudgetViewProps> = ({
       </div>
 
       {/* Top High-level summary cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400">תקציב מתוכנן כולל</span>
-          <div className="text-2xl font-bold text-white font-mono mt-1">
+      <div className="grid grid-cols-1 sm:grid-cols-4 gap-3">
+        <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-4 shadow-xs transition-colors">
+          <span className="text-xs text-slate-500 dark:text-slate-400">תקציב מתוכנן כולל</span>
+          <div className="text-xl font-bold text-[#0F172A] dark:text-white font-mono mt-1">
             ₪{totalAllocated.toLocaleString()}
           </div>
-          <span className="text-[11px] text-slate-500 mt-1 block">הגדרת תקרה לחודש הנוכחי</span>
+          <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 block">תקרה לחודש הנוכחי</span>
         </div>
 
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400">הוצאה בפועל</span>
-          <div className="text-2xl font-bold text-rose-400 font-mono mt-1">
+        <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-4 shadow-xs transition-colors">
+          <span className="text-xs text-slate-500 dark:text-slate-400">הוצאה בפועל</span>
+          <div className="text-xl font-bold text-[#BE123C] font-mono mt-1">
             ₪{totalSpent.toLocaleString()}
           </div>
-          <span className="text-[11px] text-slate-500 mt-1 block">עסקאות שאומתו עד כה</span>
+          <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 block">עסקאות שאומתו עד כה</span>
         </div>
 
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400">יתרה זמינה להוצאה</span>
-          <div className="text-2xl font-bold text-emerald-400 font-mono mt-1">
+        <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-4 shadow-xs transition-colors">
+          <span className="text-xs text-slate-500 dark:text-slate-400">יתרה זמינה להוצאה</span>
+          <div className="text-xl font-bold text-[#059669] font-mono mt-1">
             ₪{remainingBudget.toLocaleString()}
           </div>
-          <span className="text-[11px] text-slate-500 mt-1 block">נותרו עוד 4 ימים לחודש</span>
+          <span className="text-[11px] text-slate-400 dark:text-slate-500 mt-1 block">עד לסוף החודש</span>
         </div>
 
-        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-4">
-          <span className="text-xs text-slate-400">שיעור ניצול כולל</span>
+        <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-4 shadow-xs transition-colors">
+          <span className="text-xs text-slate-500 dark:text-slate-400">שיעור ניצול כולל</span>
           <div
-            className={`text-2xl font-bold font-mono mt-1 ${
-              overallUsedPct > 90 ? 'text-amber-400' : 'text-emerald-400'
+            className={`text-xl font-bold font-mono mt-1 ${
+              overallUsedPct > 90 ? 'text-amber-700 dark:text-amber-400' : 'text-[#059669]'
             }`}
           >
             {overallUsedPct}%
           </div>
-          <div className="w-full h-1.5 bg-slate-800 rounded-full mt-2 overflow-hidden">
+          <div className="w-full h-1.5 bg-slate-100 dark:bg-slate-800 rounded-full mt-2 overflow-hidden">
             <div
-              className={`h-full rounded-full ${overallUsedPct > 90 ? 'bg-amber-400' : 'bg-emerald-500'}`}
+              className={`h-full rounded-full transition-all duration-300 ${
+                overallUsedPct > 90 ? 'bg-amber-600 dark:bg-amber-500' : 'bg-emerald-600 dark:bg-emerald-500'
+              }`}
               style={{ width: `${Math.min(100, overallUsedPct)}%` }}
             />
           </div>
@@ -141,36 +143,36 @@ export const BudgetView: React.FC<BudgetViewProps> = ({
 
       {/* Add New Category Modal / Row */}
       {showNewCategory && (
-        <div className="bg-slate-900 border border-emerald-500/40 rounded-2xl p-4 shadow-xl flex flex-wrap items-center gap-3">
+        <div className="bg-white dark:bg-[#111827] border border-slate-300 dark:border-[#1F2937] rounded-xl p-4 shadow-sm flex flex-wrap items-center gap-3 transition-colors">
           <div className="flex-1 min-w-[200px]">
-            <label className="block text-[11px] text-slate-400 mb-1">שם הקטגוריה</label>
+            <label className="block text-[11px] text-slate-600 dark:text-slate-400 mb-1 font-medium">שם הקטגוריה</label>
             <input
               type="text"
               value={newCatName}
               onChange={(e) => setNewCatName(e.target.value)}
               placeholder="למשל: ספורט וכושר / קורסים"
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white focus:outline-none focus:border-emerald-500"
+              className="w-full bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white focus:outline-none focus:border-blue-600"
             />
           </div>
-          <div className="w-40">
-            <label className="block text-[11px] text-slate-400 mb-1">תקציב חודשי (₪)</label>
+          <div className="w-36">
+            <label className="block text-[11px] text-slate-600 dark:text-slate-400 mb-1 font-medium">תקציב חודשי (₪)</label>
             <input
               type="number"
               value={newCatAmount}
               onChange={(e) => setNewCatAmount(Number(e.target.value))}
-              className="w-full bg-slate-950 border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-emerald-500"
+              className="w-full bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] rounded-lg px-3 py-1.5 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-blue-600"
             />
           </div>
-          <div className="flex items-end gap-2 pt-5">
+          <div className="flex items-end gap-2 pt-4">
             <button
               onClick={handleAddCategory}
-              className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-semibold"
+              className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 text-xs font-semibold cursor-pointer"
             >
               הוסף
             </button>
             <button
               onClick={() => setShowNewCategory(false)}
-              className="px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white text-xs"
+              className="px-3 py-1.5 rounded-lg bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 hover:bg-slate-200 text-xs cursor-pointer border border-slate-200 dark:border-slate-700"
             >
               ביטול
             </button>
@@ -179,7 +181,7 @@ export const BudgetView: React.FC<BudgetViewProps> = ({
       )}
 
       {/* Categories Detailed Cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3.5">
         {budgets.map((b) => {
           const usedPct = Math.round((b.spent / b.allocated) * 100);
           const isOver = usedPct > 100;
@@ -193,128 +195,125 @@ export const BudgetView: React.FC<BudgetViewProps> = ({
           return (
             <div
               key={b.id}
-              className={`bg-slate-900/90 rounded-2xl border p-4.5 shadow-lg flex flex-col justify-between transition-all ${
+              className={`bg-white dark:bg-[#111827] rounded-xl border p-4 shadow-xs flex flex-col justify-between transition-colors ${
                 isOver
-                  ? 'border-rose-500/40 bg-rose-500/5'
+                  ? 'border-rose-300 dark:border-rose-900/60'
                   : isClose
-                  ? 'border-amber-500/30'
-                  : 'border-slate-800 hover:border-slate-700'
+                  ? 'border-amber-300 dark:border-amber-900/60'
+                  : 'border-slate-200 dark:border-[#1F2937]'
               }`}
             >
-              <div>
+              <div className="space-y-3">
                 <div className="flex items-start justify-between">
                   <div>
-                    <h3 className="text-sm font-bold text-white">{b.category}</h3>
-                    <button
-                      onClick={() =>
-                        onOpenTraceModal(
-                          `הוצאות ${b.category}`,
-                          b.spent,
-                          catTransactions
-                        )
-                      }
-                      className="text-[11px] text-emerald-400 hover:text-emerald-300 mt-0.5 inline-block"
-                    >
-                      צפה ב-{catTransactions.length} עסקאות
-                    </button>
+                    <h3 className="text-sm font-bold text-[#0F172A] dark:text-white">{b.category}</h3>
+                    <div className="flex items-center gap-1.5 mt-0.5">
+                      <span className="text-[11px] text-slate-500 dark:text-slate-400 font-mono">
+                        נוצלו ₪{b.spent.toLocaleString()} מתוך ₪{b.allocated.toLocaleString()}
+                      </span>
+                    </div>
                   </div>
 
                   <div className="text-left font-mono">
                     <span
-                      className={`text-xs font-bold px-2 py-0.5 rounded-md ${
+                      className={`text-sm font-bold ${
                         isOver
-                          ? 'bg-rose-500/20 text-rose-300'
+                          ? 'text-[#BE123C] dark:text-rose-400'
                           : isClose
-                          ? 'bg-amber-500/20 text-amber-300'
-                          : 'bg-emerald-500/10 text-emerald-400'
+                          ? 'text-amber-700 dark:text-amber-400'
+                          : 'text-slate-800 dark:text-slate-200'
                       }`}
                     >
-                      {usedPct}% נוצל
+                      {usedPct}%
                     </span>
+                    {isOver && (
+                      <span className="text-[10px] text-[#BE123C] dark:text-rose-400 block font-semibold">
+                        חריגה!
+                      </span>
+                    )}
                   </div>
                 </div>
 
                 {/* Progress bar */}
-                <div className="w-full h-2 bg-slate-800 rounded-full mt-3 overflow-hidden">
+                <div className="w-full h-2 bg-slate-100 dark:bg-slate-800 rounded-full overflow-hidden">
                   <div
                     className={`h-full rounded-full transition-all duration-300 ${
-                      isOver ? 'bg-rose-500' : isClose ? 'bg-amber-400' : 'bg-emerald-500'
+                      isOver
+                        ? 'bg-rose-600 dark:bg-rose-500'
+                        : isClose
+                        ? 'bg-amber-600 dark:bg-amber-500'
+                        : 'bg-emerald-600 dark:bg-emerald-500'
                     }`}
                     style={{ width: `${Math.min(100, usedPct)}%` }}
                   />
                 </div>
 
-                <div className="mt-3 flex items-center justify-between text-xs font-mono">
-                  <span className="text-slate-400 font-sans">הוצאה: ₪{b.spent.toLocaleString()}</span>
-                  <span className="text-slate-300 font-sans">
-                    יעד:{' '}
-                    {isEditing ? (
-                      <input
-                        type="number"
-                        value={tempAmount}
-                        onChange={(e) => setTempAmount(Number(e.target.value))}
-                        className="w-20 bg-slate-950 border border-emerald-500 rounded px-1.5 py-0.5 text-xs text-white font-mono"
-                        autoFocus
-                      />
-                    ) : (
-                      `₪${b.allocated.toLocaleString()}`
-                    )}
-                  </span>
-                </div>
-
-                {/* Suggestion pill if available */}
-                {b.suggestedAmount && b.suggestedAmount !== b.allocated && (
-                  <div className="mt-2.5 p-2 rounded-xl bg-indigo-500/10 border border-indigo-500/20 flex items-center justify-between text-[11px]">
-                    <div className="flex items-center gap-1.5 text-indigo-300">
-                      <Sparkles className="w-3.5 h-3.5 text-indigo-400 flex-shrink-0" />
-                      <span>הצעת מערכת: ₪{b.suggestedAmount.toLocaleString()}</span>
-                    </div>
+                {/* Edit inline */}
+                {isEditing ? (
+                  <div className="flex items-center gap-2 pt-2 border-t border-slate-100 dark:border-[#1F2937]">
+                    <input
+                      type="number"
+                      value={tempAmount}
+                      onChange={(e) => setTempAmount(Number(e.target.value))}
+                      className="w-28 bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] rounded-md px-2 py-1 text-xs text-slate-900 dark:text-white font-mono focus:outline-none focus:border-blue-600"
+                    />
                     <button
-                      onClick={() => handleApplySuggestion(b.id, b.suggestedAmount!)}
-                      className="text-indigo-400 hover:text-indigo-200 underline font-semibold"
+                      onClick={() => handleSaveEdit(b.id)}
+                      className="p-1 rounded bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 cursor-pointer"
+                      title="שמור תקציב"
                     >
-                      החל
+                      <Save className="w-3.5 h-3.5" />
+                    </button>
+                    <button
+                      onClick={() => setEditingId(null)}
+                      className="p-1 rounded bg-slate-200 dark:bg-slate-800 text-slate-600 dark:text-slate-400 cursor-pointer"
+                      title="ביטול"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between pt-2 border-t border-slate-100 dark:border-[#1F2937]/80 text-xs">
+                    <button
+                      onClick={() => handleStartEdit(b)}
+                      className="text-[11px] text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white flex items-center gap-1 cursor-pointer"
+                    >
+                      <Edit2 className="w-3 h-3" />
+                      <span>ערוך תקרה</span>
+                    </button>
+
+                    <button
+                      onClick={() =>
+                        onOpenTraceModal(
+                          `עסקאות חודשיות: ${b.category}`,
+                          b.spent,
+                          catTransactions
+                        )
+                      }
+                      className="text-[11px] text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white flex items-center gap-1 cursor-pointer"
+                    >
+                      <FileSearch className="w-3 h-3" />
+                      <span>{catTransactions.length} עסקאות</span>
                     </button>
                   </div>
                 )}
               </div>
 
-              {/* Card Footer Actions */}
-              <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs">
-                <span className="text-slate-500 text-[11px]">
-                  {b.previousMonthSpent
-                    ? `חודש שעבר: ₪${b.previousMonthSpent.toLocaleString()}`
-                    : 'אין נתון היסטורי'}
-                </span>
-
-                <div>
-                  {isEditing ? (
-                    <div className="flex items-center gap-1.5">
-                      <button
-                        onClick={() => handleSaveEdit(b.id)}
-                        className="px-2.5 py-1 rounded bg-emerald-600 hover:bg-emerald-500 text-white font-semibold flex items-center gap-1 text-[11px]"
-                      >
-                        <Save className="w-3 h-3" />
-                        <span>שמור</span>
-                      </button>
-                      <button
-                        onClick={() => setEditingId(null)}
-                        className="px-2 py-1 rounded bg-slate-800 text-slate-400 hover:text-white text-[11px]"
-                      >
-                        <X className="w-3 h-3" />
-                      </button>
-                    </div>
-                  ) : (
-                    <button
-                      onClick={() => handleStartEdit(b)}
-                      className="text-slate-400 hover:text-white flex items-center gap-1 text-[11px]"
-                    >
-                      <Edit2 className="w-3 h-3" />
-                      <span>ערוך יעד</span>
-                    </button>
-                  )}
+              {/* Suggestion pill if available */}
+              {b.suggestedAmount && b.suggestedAmount !== b.allocated && (
+                <div className="mt-3 pt-2.5 border-t border-slate-100 dark:border-[#1F2937]/80 flex items-center justify-between text-[11px] bg-slate-50 dark:bg-[#0B0F17] -mx-4 -mb-4 p-2.5 rounded-b-xl">
+                  <span className="text-slate-600 dark:text-slate-400 flex items-center gap-1">
+                    <Sparkles className="w-3 h-3 text-slate-500 dark:text-slate-400" />
+                    <span>הצעה: ₪{b.suggestedAmount.toLocaleString()}</span>
+                  </span>
+                  <button
+                    onClick={() => handleApplySuggestion(b.id, b.suggestedAmount!)}
+                    className="text-slate-700 dark:text-slate-300 font-semibold hover:underline cursor-pointer"
+                  >
+                    החל הצעה
+                  </button>
                 </div>
-              </div>
+              )}
             </div>
           );
         })}
