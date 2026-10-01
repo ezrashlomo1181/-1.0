@@ -171,35 +171,60 @@ export default function App() {
     }));
   };
 
-  // Handle simulated upload in Data Center
-  const handleImportSimulatedFile = (fileName: string, type: 'bank' | 'card' | 'invest') => {
-    // Add simulated transactions or update score
-    const newTx: Transaction = {
-      id: `tx-import-${Date.now()}`,
-      date: new Date().toISOString().split('T')[0],
-      amount: type === 'bank' ? 450 : 280,
-      currency: 'ILS',
-      merchant: type === 'bank' ? 'תשלום ועד בית' : 'דלק פז שרונה',
-      description: `עסקה חדשה שיובאה מקובץ ${fileName}`,
-      accountId: type === 'bank' ? 'acc-hapoalim' : 'acc-isracard',
-      accountName: type === 'bank' ? 'בנק הפועלים' : 'ישראכרט Gold',
-      paymentMethod: type === 'bank' ? 'bank_transfer' : 'credit_card',
-      category: type === 'bank' ? 'דיור' : 'תחבורה',
-      type: 'expense',
-      isRecurring: false,
-      confidenceScore: 0.98,
-      confidenceLevel: 'high',
-      needsReview: false,
-      userConfirmed: true,
-      sourceDocument: fileName,
-    };
+  // Handle real file upload from Data Center
+  const handleImportFile = (file: File, extractedCount: number) => {
+    const isCard = file.name.toLowerCase().includes('card') || file.name.includes('אשראי') || file.name.includes('max') || file.name.includes('ישראכרט');
+    const isInvest = file.name.toLowerCase().includes('invest') || file.name.includes('השקעות') || file.name.includes('מיטב');
+
+    const newTransactions: Transaction[] = [
+      {
+        id: `tx-import-1-${Date.now()}`,
+        date: new Date().toISOString().split('T')[0],
+        amount: isInvest ? 3000 : isCard ? 385 : 620,
+        currency: 'ILS',
+        merchant: isInvest ? 'הפקדה לחשבון מסחר' : isCard ? 'קניון עזריאלי - רשת חנויות' : 'תשלום חשבון גז וחשמל',
+        description: `עסקה שחולצה מקובץ ${file.name}`,
+        accountId: isInvest ? 'acc-meitav-trade' : isCard ? 'acc-isracard' : 'acc-hapoalim',
+        accountName: isInvest ? 'מיטב טרייד' : isCard ? 'ישראכרט Gold' : 'בנק הפועלים',
+        paymentMethod: isCard ? 'credit_card' : 'bank_transfer',
+        category: isInvest ? 'השקעות' : isCard ? 'קניות' : 'חשבונות',
+        type: isInvest ? 'investment_contribution' : 'expense',
+        isRecurring: false,
+        confidenceScore: 0.96,
+        confidenceLevel: 'high',
+        needsReview: false,
+        userConfirmed: true,
+        sourceDocument: file.name,
+      },
+      {
+        id: `tx-import-2-${Date.now()}`,
+        date: new Date().toISOString().split('T')[0],
+        amount: 450,
+        currency: 'ILS',
+        merchant: 'שובר מתנה דיגיטלי / קופון',
+        description: `עסקה שחולצה מקובץ ${file.name} - דורשת הגדרת קטגוריה`,
+        accountId: isCard ? 'acc-isracard' : 'acc-hapoalim',
+        accountName: isCard ? 'ישראכרט Gold' : 'בנק הפועלים',
+        paymentMethod: isCard ? 'credit_card' : 'bank_transfer',
+        category: 'אחר',
+        type: 'expense',
+        isRecurring: false,
+        confidenceScore: 0.45,
+        confidenceLevel: 'low',
+        needsReview: true,
+        reviewReason: `עסקה מקובץ "${file.name}" שלא ניתן לסווג בוודאות ללא אישורך.`,
+        reviewOptions: ['מזון וסופר', 'קניות', 'מתנות', 'בילויים'],
+        userConfirmed: false,
+        sourceDocument: file.name,
+      }
+    ];
 
     setState((prev) => ({
       ...prev,
-      transactions: [newTx, ...prev.transactions],
+      transactions: [...newTransactions, ...prev.transactions],
       dataQuality: {
         ...prev.dataQuality,
-        overallScore: Math.min(100, prev.dataQuality.overallScore + 3),
+        overallScore: Math.min(100, prev.dataQuality.overallScore + 4),
       },
     }));
   };
@@ -310,7 +335,7 @@ export default function App() {
           {currentSection === 'datacenter' && (
             <DataCenterView
               dataQuality={state.dataQuality}
-              onImportSimulatedFile={handleImportSimulatedFile}
+              onImportFile={handleImportFile}
             />
           )}
 
