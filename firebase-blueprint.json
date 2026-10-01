@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User identity and account metadata (NO financial balances or transactions)",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "email": { "type": "string" },
+        "authProvider": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "lastLogin": { "type": "string" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "accountStatus": { "type": "string", "enum": ["active", "deactivated"] },
+        "deletionStatus": { "type": "string", "enum": ["none", "pending_deletion"] },
+        "deletionRequestedAt": { "type": "string" },
+        "scheduledDeletionDate": { "type": "string" },
+        "financialProfileCompletion": { "type": "number" },
+        "onboardingCompleted": { "type": "boolean" }
+      },
+      "required": ["id", "email", "name", "accountStatus", "deletionStatus"]
+    },
+    "UserFinancialProfile": {
+      "title": "UserFinancialProfile",
+      "description": "Financial settings, goals, budgets, and state isolated per user",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "dataQualityScore": { "type": "number" },
+        "updatedAt": { "type": "string" }
+      },
+      "required": ["userId"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "User identity and status. Readable by the user and Admin."
+    },
+    "/users/{userId}/financial_data/{docId}": {
+      "schema": "UserFinancialProfile",
+      "description": "User private financial data. Strictly accessible ONLY by the owner (request.auth.uid == userId). Admin is forbidden from reading."
+    }
+  }
+}

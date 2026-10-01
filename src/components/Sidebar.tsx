@@ -28,7 +28,8 @@ export type NavSection =
   | 'analytics'
   | 'datacenter'
   | 'ask'
-  | 'settings';
+  | 'settings'
+  | 'admin';
 
 interface SidebarProps {
   currentSection: NavSection;
@@ -36,6 +37,7 @@ interface SidebarProps {
   needsReviewCount: number;
   isOpenMobile: boolean;
   onCloseMobile: () => void;
+  isAdmin?: boolean;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -44,6 +46,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   needsReviewCount,
   isOpenMobile,
   onCloseMobile,
+  isAdmin = false,
 }) => {
   const navItems = [
     { id: 'dashboard', label: 'דף הבית', icon: LayoutDashboard },
@@ -62,6 +65,17 @@ export const Sidebar: React.FC<SidebarProps> = ({
     { id: 'analytics', label: 'ניתוחים', icon: LineChart },
     { id: 'datacenter', label: 'מרכז הנתונים', icon: FolderInput },
     { id: 'ask', label: 'שאל את הכספים שלי', icon: BotMessageSquare, special: true },
+    ...(isAdmin
+      ? [
+          {
+            id: 'admin',
+            label: 'ניהול מערכת (Admin)',
+            icon: ShieldAlert,
+            badge: 'Admin',
+            badgeColor: 'bg-indigo-500/20 text-indigo-300 border-indigo-500/30',
+          },
+        ]
+      : []),
   ];
 
   return (

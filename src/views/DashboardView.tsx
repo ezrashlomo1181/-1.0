@@ -46,6 +46,8 @@ interface DashboardViewProps {
   onNavigateToSection: (section: any) => void;
   onOpenTraceModal: (title: string, amount: number, transactions: Transaction[]) => void;
   onOpenReviewTransaction: (tx: Transaction) => void;
+  financialProfileCompletion?: number;
+  onLoadDemoData?: () => void;
 }
 
 export const DashboardView: React.FC<DashboardViewProps> = ({
@@ -59,7 +61,137 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   onNavigateToSection,
   onOpenTraceModal,
   onOpenReviewTransaction,
+  financialProfileCompletion = 15,
+  onLoadDemoData,
 }) => {
+  const isCompletelyEmpty = accounts.length === 0 && transactions.length === 0;
+
+  if (isCompletelyEmpty) {
+    return (
+      <div className="space-y-6 pb-12 animate-in fade-in duration-300">
+        {/* Profile Completion Indicator */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 shadow-xl flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 font-bold font-mono">
+              {financialProfileCompletion}%
+            </div>
+            <div>
+              <h3 className="text-sm font-bold text-white">השלמת תמונת מצב פיננסית</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                חשבונך פעיל ומאובטח. הוספת חשבון או תדפיס תבנה את התמונה המלאה.
+              </p>
+            </div>
+          </div>
+          <div className="w-full sm:w-48 bg-slate-800 h-2 rounded-full overflow-hidden">
+            <div
+              className="bg-emerald-400 h-full rounded-full transition-all duration-500"
+              style={{ width: `${financialProfileCompletion}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Empty State Hero Card */}
+        <div className="bg-slate-900/90 border border-slate-800 rounded-3xl p-8 sm:p-12 text-center max-w-2xl mx-auto shadow-2xl space-y-6">
+          <div className="w-16 h-16 rounded-3xl bg-slate-800 border border-slate-700 flex items-center justify-center text-emerald-400 mx-auto">
+            <Wallet className="w-8 h-8" />
+          </div>
+
+          <div className="space-y-2">
+            <h2 className="text-xl sm:text-2xl font-black text-white">
+              עדיין אין לנו מספיק מידע כדי להציג את התמונה הפיננסית שלך
+            </h2>
+            <p className="text-xs sm:text-sm text-slate-400 max-w-md mx-auto leading-relaxed">
+              המערכת אינה מנחשת ואינה ממציאה נתונים. בחר את הצעד הראשון כדי להתחיל לעשות סדר:
+            </p>
+          </div>
+
+          {/* Action Grid */}
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-2 text-right">
+            <button
+              onClick={() => onNavigateToSection('datacenter')}
+              className="p-4 rounded-2xl bg-emerald-500/10 hover:bg-emerald-500/20 border border-emerald-500/30 hover:border-emerald-500/60 transition-all flex items-start gap-3 group cursor-pointer"
+            >
+              <div className="w-9 h-9 rounded-xl bg-emerald-500/20 text-emerald-400 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+                <ArrowUpRight className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-white group-hover:text-emerald-300 block">
+                  ייבא תדפיס בנק / אשראי
+                </span>
+                <span className="text-[11px] text-slate-400 mt-0.5 block">
+                  קליטה וסיווג אוטומטי של קובץ Excel, CSV או PDF
+                </span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => onNavigateToSection('transactions')}
+              className="p-4 rounded-2xl bg-slate-950/70 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 transition-all flex items-start gap-3 group cursor-pointer"
+            >
+              <div className="w-9 h-9 rounded-xl bg-cyan-500/15 text-cyan-400 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+                <Wallet className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-white group-hover:text-cyan-300 block">
+                  הוסף חשבון או עסקה ראשונה
+                </span>
+                <span className="text-[11px] text-slate-400 mt-0.5 block">
+                  הזנה ידנית מהירה של יתרה, חשבון עו״ש או כרטיס
+                </span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => onNavigateToSection('budget')}
+              className="p-4 rounded-2xl bg-slate-950/70 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 transition-all flex items-start gap-3 group cursor-pointer"
+            >
+              <div className="w-9 h-9 rounded-xl bg-indigo-500/15 text-indigo-400 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+                <BadgePercent className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-white group-hover:text-indigo-300 block">
+                  הגדר תקרת תקציב
+                </span>
+                <span className="text-[11px] text-slate-400 mt-0.5 block">
+                  הגדרת מגבלות הוצאה חודשיות לפי קטגוריות
+                </span>
+              </div>
+            </button>
+
+            <button
+              onClick={() => onNavigateToSection('goals')}
+              className="p-4 rounded-2xl bg-slate-950/70 hover:bg-slate-800/80 border border-slate-800 hover:border-slate-700 transition-all flex items-start gap-3 group cursor-pointer"
+            >
+              <div className="w-9 h-9 rounded-xl bg-amber-500/15 text-amber-400 flex items-center justify-center flex-shrink-0 group-hover:scale-105 transition-transform">
+                <PiggyBank className="w-4 h-4" />
+              </div>
+              <div>
+                <span className="text-xs font-bold text-white group-hover:text-amber-300 block">
+                  הגדר יעד פיננסי
+                </span>
+                <span className="text-[11px] text-slate-400 mt-0.5 block">
+                  קרן חירום, חופשה, דירה או יעד חיסכון
+                </span>
+              </div>
+            </button>
+          </div>
+
+          {onLoadDemoData && (
+            <div className="pt-4 border-t border-slate-800/80 text-center">
+              <button
+                type="button"
+                onClick={onLoadDemoData}
+                className="text-xs text-slate-400 hover:text-emerald-400 underline transition-colors cursor-pointer"
+              >
+                רוצה קודם לראות איך המערכת עובדת? לחץ כאן לטעינת נתוני דוגמה
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   const netWorth = calculateNetWorth(accounts);
   const cashFlow = calculateMonthlyCashFlow(transactions, accounts);
   const cashFlowHistory = getCashFlowHistory(transactions, 6);

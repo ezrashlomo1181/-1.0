@@ -147,3 +147,20 @@ export interface UploadedDocument {
   transactionsCount: number;
   institution?: string;
 }
+
+export interface UserProfile {
+  id: string; // Firebase Auth UID
+  name: string;
+  email: string;
+  authProvider: 'google.com' | 'apple.com' | 'password';
+  createdAt: string;
+  lastLogin: string;
+  role: 'user' | 'admin';
+  accountStatus: 'active' | 'deactivated';
+  deletionStatus: 'none' | 'pending_deletion';
+  deletionRequestedAt: string | null;
+  scheduledDeletionDate: string | null;
+  financialProfileCompletion: number; // 0 - 100
+  onboardingCompleted: boolean;
+}
+
