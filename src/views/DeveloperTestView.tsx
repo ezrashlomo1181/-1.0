@@ -42,6 +42,7 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
   const demoUsers: (UserProfile & { description: string })[] = [
     {
       id: 'demo-user-1',
+      username: 'israeli_family',
       name: 'משפחת ישראלי (הכנסה בינונית, 2 כרטיסים)',
       email: 'demo1@matzpen.test',
       authProvider: 'password',
@@ -59,9 +60,10 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
     },
     {
       id: 'demo-user-2',
+      username: 'danny_ron',
       name: 'דני רון (עצמאי, השקעות והוצאות גבוהות)',
       email: 'demo2@matzpen.test',
-      authProvider: 'google.com',
+      authProvider: 'password',
       createdAt: '2026-03-20T14:30:00Z',
       lastLogin: '2026-10-01T06:30:00Z',
       role: 'user',
@@ -76,9 +78,10 @@ export const DeveloperTestView: React.FC<DeveloperTestViewProps> = ({
     },
     {
       id: 'demo-user-3',
+      username: 'roni_cohen',
       name: 'רוני כהן (סטודנטית, תקציב הדוק)',
       email: 'demo3@matzpen.test',
-      authProvider: 'apple.com',
+      authProvider: 'password',
       createdAt: '2026-07-01T09:15:00Z',
       lastLogin: '2026-09-30T22:00:00Z',
       role: 'user',

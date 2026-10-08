@@ -149,14 +149,9 @@ export const Header: React.FC<HeaderProps> = ({
                 <div className="absolute left-0 mt-2 w-56 rounded-xl bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] shadow-lg p-2 z-40 space-y-1 animate-in fade-in">
                   <div className="p-2 border-b border-slate-100 dark:border-[#1F2937]">
                     <div className="font-bold text-slate-900 dark:text-white text-xs truncate">{user.name}</div>
-                    <div className="text-[11px] text-slate-500 dark:text-slate-400 font-mono truncate" dir="ltr">
-                      {user.email}
+                    <div className="text-[11px] text-slate-500 dark:text-slate-400 font-medium truncate">
+                      @{user.username || user.name}
                     </div>
-                    {user.role === 'admin' && (
-                      <span className="inline-block mt-1 text-[10px] bg-indigo-50 dark:bg-indigo-950/60 text-indigo-700 dark:text-indigo-300 border border-indigo-200 dark:border-indigo-800 px-1.5 py-0.2 rounded font-mono font-bold">
-                        ADMIN
-                      </span>
-                    )}
                   </div>
 
                   <button

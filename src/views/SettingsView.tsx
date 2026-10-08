@@ -94,22 +94,17 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
               <div>
                 <div className="flex items-center gap-2">
                   <h3 className="text-sm font-bold text-[#0F172A] dark:text-white">{userProfile.name}</h3>
-                  {userProfile.role === 'admin' && (
-                    <span className="text-[10px] font-mono font-bold bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 px-1.5 py-0.2 rounded">
-                      ADMIN
-                    </span>
-                  )}
                 </div>
-                <div className="text-xs text-slate-500 dark:text-slate-400 font-mono flex items-center gap-1.5 mt-0.5" dir="ltr">
-                  <Mail className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{userProfile.email}</span>
+                <div className="text-xs text-slate-500 dark:text-slate-400 font-medium flex items-center gap-1.5 mt-0.5">
+                  <User className="w-3.5 h-3.5 text-slate-400" />
+                  <span>@{userProfile.username || userProfile.name}</span>
                 </div>
               </div>
             </div>
 
             <div className="flex items-center gap-2">
               <span className="text-xs px-2.5 py-1 rounded-lg bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-[#1F2937] text-slate-600 dark:text-slate-300 font-mono">
-                התחברות: {userProfile.authProvider.replace('.com', '')}
+                אימות מקומי
               </span>
               <span
                 className={`text-xs px-2.5 py-1 rounded-lg font-medium border ${

@@ -13,6 +13,12 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = 3000;
 
+app.use((_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, max-age=0');
+  res.setHeader('Pragma', 'no-cache');
+  next();
+});
+
 app.use(express.json({ limit: '15mb' }));
 
 // AI Helper with @google/genai

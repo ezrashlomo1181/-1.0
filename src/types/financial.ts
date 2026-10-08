@@ -151,10 +151,11 @@ export interface UploadedDocument {
 }
 
 export interface UserProfile {
-  id: string; // Firebase Auth UID
+  id: string; // Local user ID
+  username?: string;
   name: string;
-  email: string;
-  authProvider: 'google.com' | 'apple.com' | 'password';
+  email?: string;
+  authProvider: 'google.com' | 'apple.com' | 'password' | 'local';
   createdAt: string;
   lastLogin: string;
   role: 'user' | 'admin';

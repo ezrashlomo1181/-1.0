@@ -10,7 +10,7 @@ import {
   Eye,
   User,
 } from 'lucide-react';
-import { updateUserProfileDoc } from '../services/firebase';
+import { updateLocalUserProfile } from '../services/localAuth';
 
 interface UserOnboardingModalProps {
   isOpen: boolean;
@@ -51,12 +51,12 @@ export const UserOnboardingModal: React.FC<UserOnboardingModalProps> = ({
 
   const handleFinish = async (choice: 'upload' | 'manual' | 'explore') => {
     try {
-      await updateUserProfileDoc(userId, {
+      updateLocalUserProfile(userId, {
         name: userName.trim() || initialName,
         onboardingCompleted: true,
       });
     } catch (e) {
-      console.warn('Could not update onboarding status in firestore', e);
+      console.warn('Could not update onboarding status locally', e);
     }
     onComplete(choice);
   };

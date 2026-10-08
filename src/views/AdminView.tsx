@@ -107,7 +107,8 @@ export const AdminView: React.FC<AdminViewProps> = () => {
   const filtered = users.filter(
     (u) =>
       u.name.toLowerCase().includes(search.toLowerCase()) ||
-      u.email.toLowerCase().includes(search.toLowerCase()) ||
+      (u.username && u.username.toLowerCase().includes(search.toLowerCase())) ||
+      (u.email && u.email.toLowerCase().includes(search.toLowerCase())) ||
       u.id.toLowerCase().includes(search.toLowerCase())
   );
 
@@ -221,8 +222,8 @@ export const AdminView: React.FC<AdminViewProps> = () => {
                           UID: {u.id.substring(0, 10)}...
                         </div>
                       </td>
-                      <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-300" dir="ltr">
-                        {u.email}
+                      <td className="py-3 px-4 font-mono text-slate-600 dark:text-slate-300">
+                        {u.username ? `@${u.username}` : (u.email || '—')}
                       </td>
                       <td className="py-3 px-4">
                         <span className="capitalize px-2 py-0.5 rounded-md text-[11px] bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-slate-700 font-mono">

@@ -1,17 +1,18 @@
 import React, { useState, useEffect } from 'react';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
 import {
-  auth,
-  createOrUpdateUserProfile,
-  getUserProfile,
-  requestAccountDeletion,
-  cancelAccountDeletion,
-} from './services/firebase';
+  subscribeToLocalAuth,
+  logoutLocalUser,
+  requestLocalAccountDeletion,
+  cancelLocalAccountDeletion,
+} from './services/localAuth';
 import {
   loadInitialState,
   saveState,
   resetToDemoData,
   switchToMyDataEmpty,
+  loadUserSpecificState,
+  saveUserSpecificState,
+  createEmptyUserState,
   AppState,
 } from './services/storage';
 import {
@@ -45,7 +46,6 @@ import { AnalyticsView } from './views/AnalyticsView';
 import { DataCenterView } from './views/DataCenterView';
 import { AskFinancesView } from './views/AskFinancesView';
 import { SettingsView } from './views/SettingsView';
-import { AdminView } from './views/AdminView';
 import { DeveloperTestView } from './views/DeveloperTestView';
 import { areTestingToolsEnabled } from './config/testingConfig';
 
@@ -78,60 +78,46 @@ export default function App() {
   const [isOnboardingOpen, setIsOnboardingOpen] = useState(false);
   const [isMyDocumentsOpen, setIsMyDocumentsOpen] = useState(false);
 
-  // Listen to Firebase Auth state
+  // Listen to Local Auth state and manage isolated user data
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      if (firebaseUser) {
-        try {
-          const profile = await createOrUpdateUserProfile(firebaseUser);
-          setUserProfile(profile);
+    let previousUserId: string | null = null;
 
-          // Check if deactivated by admin
-          if (profile.accountStatus === 'deactivated') {
-            alert('חשבונך הושבת על ידי מנהל המערכת. אנא פנה לתמיכה.');
-            await signOut(auth);
-            setUserProfile(null);
-            return;
-          }
+    const unsubscribe = subscribeToLocalAuth((localUser) => {
+      setUserProfile(localUser);
 
-          // Trigger onboarding if brand new
-          if (!profile.onboardingCompleted) {
-            setIsUserOnboardingOpen(true);
-            // Switch to clean personal empty state for new user
-            const userKey = `matzpen_user_${firebaseUser.uid}`;
-            const savedUserData = localStorage.getItem(userKey);
-            if (!savedUserData) {
-              const empty = switchToMyDataEmpty();
-              setState(empty);
-            }
+      if (localUser) {
+        if (previousUserId !== localUser.id) {
+          previousUserId = localUser.id;
+          const userState = loadUserSpecificState(localUser.id);
+          if (userState) {
+            setState(userState);
           } else {
-            // Load user-specific data from user storage key if present
-            const userKey = `matzpen_user_${firebaseUser.uid}`;
-            const savedUserData = localStorage.getItem(userKey);
-            if (savedUserData) {
-              try {
-                const parsed = JSON.parse(savedUserData);
-                setState(parsed);
-              } catch (e) {
-                console.warn('Error loading user data', e);
-              }
-            }
+            // New user without stored financial data yet -> initialize isolated empty state
+            const cleanState = createEmptyUserState();
+            saveUserSpecificState(localUser.id, cleanState);
+            setState(cleanState);
           }
-        } catch (err) {
-          console.error('Error fetching/creating profile:', err);
+
+          if (!localUser.onboardingCompleted) {
+            setIsUserOnboardingOpen(true);
+          }
         }
       } else {
-        setUserProfile(null);
+        if (previousUserId !== null) {
+          previousUserId = null;
+          // When logged out, reset to demo data so previous user's financial data is not visible
+          setState(loadInitialState());
+        }
       }
     });
 
     return () => unsubscribe();
   }, []);
 
-  // Sync state to localStorage (Scoped per user if logged in, otherwise global demo state)
+  // Sync state to localStorage (Scoped strictly per user if logged in, otherwise global demo state)
   useEffect(() => {
     if (userProfile?.id) {
-      localStorage.setItem(`matzpen_user_${userProfile.id}`, JSON.stringify(state));
+      saveUserSpecificState(userProfile.id, state);
     } else {
       saveState(state);
     }
@@ -367,55 +353,24 @@ export default function App() {
   };
 
   // Grace Period Deletion Request
-  const handleRequestAccountDeletion = async () => {
+  const handleRequestAccountDeletion = () => {
     if (!userProfile) return;
-    try {
-      await requestAccountDeletion(userProfile.id);
-      const scheduledDate = new Date();
-      scheduledDate.setDate(scheduledDate.getDate() + 30);
-      setUserProfile((prev) =>
-        prev
-          ? {
-              ...prev,
-              deletionStatus: 'pending_deletion',
-              scheduledDeletionDate: scheduledDate.toISOString(),
-            }
-          : null
-      );
-    } catch (e) {
-      console.error('Error requesting deletion:', e);
-    }
+    requestLocalAccountDeletion(userProfile.id);
   };
 
   // Grace Period Deletion Cancel
-  const handleCancelGraceDeletion = async () => {
+  const handleCancelGraceDeletion = () => {
     if (!userProfile) return;
-    try {
-      await cancelAccountDeletion(userProfile.id);
-      setUserProfile((prev) =>
-        prev
-          ? {
-              ...prev,
-              deletionStatus: 'none',
-              scheduledDeletionDate: null,
-              accountStatus: 'active',
-            }
-          : null
-      );
-    } catch (e) {
-      console.error('Error cancelling deletion:', e);
-    }
+    cancelLocalAccountDeletion(userProfile.id);
   };
 
   // User Sign Out
-  const handleSignOut = async () => {
-    try {
-      await signOut(auth);
-      setUserProfile(null);
-      setCurrentSection('dashboard');
-    } catch (e) {
-      console.error('Sign out error:', e);
-    }
+  const handleSignOut = () => {
+    logoutLocalUser();
+    setUserProfile(null);
+    setState(loadInitialState());
+    setCurrentSection('dashboard');
+    setIsAuthModalOpen(true);
   };
 
   // Switch demo user session (Section 15 & 16)
@@ -674,8 +629,6 @@ export default function App() {
     }
   };
 
-  const isAdminUser = userProfile?.role === 'admin';
-
   return (
     <div className="min-h-screen bg-[#F8FAFC] text-[#0F172A] dark:bg-[#0B0F17] dark:text-slate-100 flex flex-col font-sans transition-colors duration-150" dir="rtl">
       {/* 30-Day Account Deletion Grace Period Banner (#6) */}
@@ -704,7 +657,6 @@ export default function App() {
         needsReviewCount={needsReviewList.length}
         isOpenMobile={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
-        isAdmin={isAdminUser}
       />
 
       {/* Main Content Area */}
@@ -836,11 +788,6 @@ export default function App() {
               onRequestAccountDeletion={handleRequestAccountDeletion}
               onCancelAccountDeletion={handleCancelGraceDeletion}
             />
-          )}
-
-          {/* Admin Management Dashboard (#12 & #13) */}
-          {currentSection === 'admin' && isAdminUser && (
-            <AdminView currentUserEmail={userProfile?.email || ''} />
           )}
 
           {/* Developer / Testing Panel (#15 - #20) */}

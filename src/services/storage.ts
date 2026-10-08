@@ -120,3 +120,65 @@ export function switchToMyDataEmpty(): AppState {
   saveState(emptyState);
   return emptyState;
 }
+
+// User-scoped isolated financial storage
+export function getUserStorageKey(userId: string): string {
+  return `matzpen_user_${userId}`;
+}
+
+export function loadUserSpecificState(userId: string): AppState | null {
+  try {
+    const raw = localStorage.getItem(getUserStorageKey(userId));
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && Array.isArray(parsed.transactions)) {
+        if (!Array.isArray(parsed.documents)) {
+          parsed.documents = [];
+        }
+        return parsed;
+      }
+    }
+  } catch (e) {
+    console.warn(`Failed to load isolated financial state for user ${userId}:`, e);
+  }
+  return null;
+}
+
+export function saveUserSpecificState(userId: string, state: AppState): void {
+  try {
+    localStorage.setItem(getUserStorageKey(userId), JSON.stringify(state));
+  } catch (e) {
+    console.error(`Failed to save isolated financial state for user ${userId}:`, e);
+  }
+}
+
+export function createEmptyUserState(): AppState {
+  return {
+    isDemoMode: false,
+    accounts: [],
+    transactions: [],
+    budgets: [],
+    goals: [],
+    investments: [],
+    recurring: [],
+    anomalies: [],
+    learnedRules: [],
+    documents: [],
+    dataQuality: {
+      overallScore: 0,
+      institutions: [],
+      recommendations: [
+        'העלה קובץ תדפיס ראשון ממרכז הנתונים (PDF, CSV או Excel)',
+        'המערכת תנתח אוטומטית עסקאות, חשבונות והוראות קבע.',
+      ],
+    },
+  };
+}
+
+export function clearUserSpecificState(userId: string): void {
+  try {
+    localStorage.removeItem(getUserStorageKey(userId));
+  } catch (e) {
+    console.error(`Failed to clear isolated financial state for user ${userId}:`, e);
+  }
+}
