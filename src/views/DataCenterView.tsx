@@ -1,5 +1,6 @@
 import React, { useState, useRef, DragEvent, ChangeEvent } from 'react';
-import { DataQualityReport, UploadedDocument, ManagedFileItem } from '../types/financial';
+import { DataQualityReport, UploadedDocument, ManagedFileItem, Transaction } from '../types/financial';
+import { parseFinancialDocument } from '../services/documentParser';
 import {
   FolderInput,
   UploadCloud,
@@ -29,7 +30,7 @@ interface DataCenterViewProps {
   documentsCount: number;
   existingDocuments?: UploadedDocument[];
   onOpenMyDocuments: () => void;
-  onImportFile: (file: File, extractedCount: number) => void;
+  onImportFile: (file: File, extractedTransactions: Transaction[], detectedInstitution?: string) => void;
 }
 
 export const DataCenterView: React.FC<DataCenterViewProps> = ({
@@ -329,7 +330,7 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
     }
   };
 
-  // Process all files in queue sequentially
+  // Process all files in queue sequentially using real document parser
   const handleStartProcessingQueue = async () => {
     if (queue.length === 0 || isProcessingQueue) return;
 
@@ -350,36 +351,62 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
         )
       );
 
-      await new Promise((r) => setTimeout(r, 400));
-
-      // 2. Processing stage
-      setQueue((prev) =>
-        prev.map((q, idx) => (idx === i ? { ...q, uploadStatus: 'uploaded' } : q))
-      );
-
-      await new Promise((r) => setTimeout(r, 600));
-
       const fileObj = filesMap.get(currentItem.id);
-      const calculatedCount = fileObj
-        ? Math.max(12, Math.min(140, Math.round(fileObj.size / 850)))
-        : 25;
-
       if (fileObj) {
-        onImportFile(fileObj, calculatedCount);
-      }
+        try {
+          // Real document parsing (Excel, CSV, PDF)
+          const parseResult = await parseFinancialDocument(fileObj);
 
-      // 3. Processed
-      setQueue((prev) =>
-        prev.map((q, idx) =>
-          idx === i
-            ? {
-                ...q,
-                processingStatus: 'processed',
-                extractedTransactionsCount: calculatedCount,
-              }
-            : q
-        )
-      );
+          if (parseResult.success && parseResult.transactions.length > 0) {
+            onImportFile(fileObj, parseResult.transactions, parseResult.institution);
+
+            setQueue((prev) =>
+              prev.map((q, idx) =>
+                idx === i
+                  ? {
+                      ...q,
+                      uploadStatus: 'uploaded',
+                      processingStatus: 'processed',
+                      extractedTransactionsCount: parseResult.transactions.length,
+                      institutionDetected: parseResult.institution,
+                      errorDetails: undefined,
+                    }
+                  : q
+              )
+            );
+          } else {
+            // File was empty or could not yield real transactions
+            setQueue((prev) =>
+              prev.map((q, idx) =>
+                idx === i
+                  ? {
+                      ...q,
+                      uploadStatus: 'uploaded',
+                      processingStatus: 'needs_review',
+                      extractedTransactionsCount: 0,
+                      institutionDetected: parseResult.institution,
+                      errorDetails: parseResult.error || 'לא זוהו עסקאות במסמך זה',
+                    }
+                  : q
+              )
+            );
+          }
+        } catch (err) {
+          setQueue((prev) =>
+            prev.map((q, idx) =>
+              idx === i
+                ? {
+                    ...q,
+                    uploadStatus: 'failed',
+                    processingStatus: 'needs_review',
+                    extractedTransactionsCount: 0,
+                    errorDetails: err instanceof Error ? err.message : 'שגיאה בעיבוד הקובץ',
+                  }
+                : q
+            )
+          );
+        }
+      }
     }
 
     setIsProcessingQueue(false);
@@ -678,6 +705,11 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
                         <span className="inline-flex items-center gap-1 text-[11px] text-emerald-800 dark:text-emerald-300 font-bold bg-emerald-50 dark:bg-emerald-950/40 px-2 py-0.5 rounded-md border border-emerald-200 dark:border-emerald-800">
                           <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 dark:text-emerald-400" />
                           <span>חולצו {item.extractedTransactionsCount} עסקאות</span>
+                        </span>
+                      ) : item.processingStatus === 'needs_review' ? (
+                        <span className="inline-flex items-center gap-1 text-[11px] text-amber-800 dark:text-amber-300 font-bold bg-amber-50 dark:bg-amber-950/40 px-2 py-0.5 rounded-md border border-amber-200 dark:border-amber-800" title={item.errorDetails}>
+                          <AlertCircle className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                          <span className="truncate max-w-[140px]">{item.errorDetails || 'ללא עסקאות'}</span>
                         </span>
                       ) : isItemProcessing ? (
                         <span className="inline-flex items-center gap-1 text-[11px] text-slate-800 dark:text-slate-300 font-bold bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700 animate-pulse">

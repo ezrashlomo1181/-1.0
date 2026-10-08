@@ -25,6 +25,7 @@ import {
   UploadedDocument,
   UserProfile,
 } from './types/financial';
+import { deduplicateTransactions, parseFinancialDocument } from './services/documentParser';
 import { Sidebar, NavSection } from './components/Sidebar';
 import { Header } from './components/Header';
 import { VerificationModal } from './components/VerificationModal';
@@ -245,17 +246,12 @@ export default function App() {
     }));
   };
 
-  // Handle real file upload from Data Center
-  const handleImportFile = (file: File, extractedCount: number) => {
-    const isCard =
-      file.name.toLowerCase().includes('card') ||
-      file.name.includes('אשראי') ||
-      file.name.includes('max') ||
-      file.name.includes('ישראכרט');
-    const isInvest =
-      file.name.toLowerCase().includes('invest') ||
-      file.name.includes('השקעות') ||
-      file.name.includes('מיטב');
+  // Handle real file upload from Data Center - Strictly real transactions, no mocks
+  const handleImportFile = (file: File, extractedTransactions: Transaction[], detectedInstitution?: string) => {
+    if (!extractedTransactions || extractedTransactions.length === 0) {
+      // Strictly prevent creating any mock or dummy transactions
+      return;
+    }
 
     const fileExt = file.name.toLowerCase().endsWith('.pdf')
       ? 'pdf'
@@ -265,73 +261,62 @@ export default function App() {
       ? 'xls'
       : 'xlsx';
 
-    const newDoc: UploadedDocument = {
-      id: `doc-${Date.now()}`,
-      fileName: file.name,
-      fileType: fileExt,
-      fileSize: file.size,
-      uploadDate: new Date().toISOString().split('T')[0],
-      status: 'completed',
-      transactionsCount: extractedCount,
-      institution: isInvest ? 'מיטב טרייד' : isCard ? 'ישראכרט' : 'בנק הפועלים',
-    };
+    const institution = detectedInstitution || (
+      file.name.includes('לאומי') ? 'בנק לאומי' :
+      file.name.includes('דיסקונט') ? 'בנק דיסקונט' :
+      file.name.includes('מזרחי') ? 'מזרחי טפחות' :
+      file.name.includes('ישראכרט') ? 'ישראכרט' :
+      file.name.toLowerCase().includes('max') || file.name.includes('מקס') ? 'מקס (MAX)' :
+      file.name.toLowerCase().includes('cal') || file.name.includes('כאל') ? 'כאל (CAL)' :
+      'בנק / כרטיס אשראי'
+    );
 
-    const newTransactions: Transaction[] = [
-      {
-        id: `tx-import-1-${Date.now()}`,
-        date: new Date().toISOString().split('T')[0],
-        amount: isInvest ? 3000 : isCard ? 385 : 620,
-        currency: 'ILS',
-        merchant: isInvest
-          ? 'הפקדה לחשבון מסחר'
-          : isCard
-          ? 'קניון עזריאלי - רשת חנויות'
-          : 'תשלום חשבון גז וחשמל',
-        description: `עסקה שחולצה מקובץ ${file.name}`,
-        accountId: isInvest ? 'acc-meitav-trade' : isCard ? 'acc-isracard' : 'acc-hapoalim',
-        accountName: isInvest ? 'מיטב טרייד' : isCard ? 'ישראכרט Gold' : 'בנק הפועלים',
-        paymentMethod: isCard ? 'credit_card' : 'bank_transfer',
-        category: isInvest ? 'השקעות' : isCard ? 'קניות' : 'חשבונות',
-        type: isInvest ? 'investment_contribution' : 'expense',
-        isRecurring: false,
-        confidenceScore: 0.96,
-        confidenceLevel: 'high',
-        needsReview: false,
-        userConfirmed: true,
-        sourceDocument: file.name,
-      },
-      {
-        id: `tx-import-2-${Date.now()}`,
-        date: new Date().toISOString().split('T')[0],
-        amount: 450,
-        currency: 'ILS',
-        merchant: 'שובר מתנה דיגיטלי / קופון',
-        description: `עסקה שחולצה מקובץ ${file.name} - דורשת הגדרת קטגוריה`,
-        accountId: isCard ? 'acc-isracard' : 'acc-hapoalim',
-        accountName: isCard ? 'ישראכרט Gold' : 'בנק הפועלים',
-        paymentMethod: isCard ? 'credit_card' : 'bank_transfer',
-        category: 'אחר',
-        type: 'expense',
-        isRecurring: false,
-        confidenceScore: 0.45,
-        confidenceLevel: 'low',
-        needsReview: true,
-        reviewReason: `עסקה מקובץ "${file.name}" שלא ניתן לסווג בוודאות ללא אישורך.`,
-        reviewOptions: ['מזון וסופר', 'קניות', 'מתנות', 'בילויים'],
-        userConfirmed: false,
-        sourceDocument: file.name,
-      },
-    ];
+    setState((prev) => {
+      // 1. Deduplicate new transactions against existing user transactions
+      const { uniqueTxs } = deduplicateTransactions(prev.transactions, extractedTransactions);
 
-    setState((prev) => ({
-      ...prev,
-      documents: [newDoc, ...prev.documents],
-      transactions: [...newTransactions, ...prev.transactions],
-      dataQuality: {
-        ...prev.dataQuality,
-        overallScore: Math.min(100, prev.dataQuality.overallScore + 4),
-      },
-    }));
+      const newDoc: UploadedDocument = {
+        id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        fileName: file.name,
+        fileType: fileExt,
+        fileSize: file.size,
+        uploadDate: new Date().toISOString().split('T')[0],
+        status: 'completed',
+        transactionsCount: uniqueTxs.length,
+        institution,
+      };
+
+      // 2. Register detected accounts if not already present
+      const existingAccountIds = new Set(prev.accounts.map((a) => a.id));
+      const newAccounts = [...prev.accounts];
+      for (const tx of uniqueTxs) {
+        if (!existingAccountIds.has(tx.accountId)) {
+          existingAccountIds.add(tx.accountId);
+          newAccounts.push({
+            id: tx.accountId,
+            name: tx.accountName,
+            institution,
+            type: tx.paymentMethod === 'credit_card' ? 'credit_card' : 'bank',
+            balance: 0,
+            currency: 'ILS',
+            accountNumberMasked: `****${Math.floor(1000 + Math.random() * 9000)}`,
+            lastUpdated: new Date().toISOString().split('T')[0],
+            importedMonthsCount: 1,
+          });
+        }
+      }
+
+      return {
+        ...prev,
+        accounts: newAccounts,
+        documents: [newDoc, ...prev.documents],
+        transactions: [...uniqueTxs, ...prev.transactions],
+        dataQuality: {
+          ...prev.dataQuality,
+          overallScore: Math.min(100, Math.max(prev.dataQuality.overallScore, 40) + Math.min(25, uniqueTxs.length * 2)),
+        },
+      };
+    });
   };
 
   // Real document deletion
@@ -610,8 +595,11 @@ export default function App() {
   };
 
   // Inject test file directly into data center
-  const handleInjectTestFile = (file: File) => {
-    handleImportFile(file, Math.floor(Math.random() * 15) + 12);
+  const handleInjectTestFile = async (file: File) => {
+    const parseResult = await parseFinancialDocument(file);
+    if (parseResult.success && parseResult.transactions.length > 0) {
+      handleImportFile(file, parseResult.transactions, parseResult.institution);
+    }
     setCurrentSection('datacenter');
   };
 
