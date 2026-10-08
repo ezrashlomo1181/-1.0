@@ -259,8 +259,10 @@ app.post('/api/ai/parse-document', async (req, res) => {
               detectedInstitution: parsed.detectedInstitution || detectedInstitution,
               extractedTransactions: parsed.extractedTransactions,
               extractedTransactionsCount: parsed.extractedTransactions.length,
+              processingMethod: isVisualDocument ? 'OCR חזותי (Gemini AI)' : 'פענוח שכבת טקסט',
+              isVisualDocument,
               message: parsed.extractedTransactions.length > 0
-                ? `חולצו ${parsed.extractedTransactions.length} עסקאות אמיתיות מתוך ${fileName}.`
+                ? `חולצו ${parsed.extractedTransactions.length} עסקאות אמיתיות מתוך ${fileName}${isVisualDocument ? ' (באמצעות OCR חזותי)' : ''}.`
                 : 'לא זוהו עסקאות במסמך זה.',
             });
           }

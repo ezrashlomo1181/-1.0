@@ -147,14 +147,19 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       if (t.type === 'expense' || t.type === 'fee' || t.type === 'loan_payment') {
         const cat = t.category || 'אחר';
         map.set(cat, (map.get(cat) || 0) + t.amount);
+      } else if (t.type === 'refund') {
+        const cat = t.category || 'אחר';
+        map.set(cat, (map.get(cat) || 0) - t.amount);
       }
     }
-    const arr = Array.from(map.entries()).map(([category, amount]) => ({
-      category,
-      amount,
-      percentage: totalExpense > 0 ? Math.round((amount / totalExpense) * 100) : 0,
-      color: getCategoryColor(category),
-    }));
+    const arr = Array.from(map.entries())
+      .filter(([_, amount]) => amount > 0)
+      .map(([category, amount]) => ({
+        category,
+        amount,
+        percentage: totalExpense > 0 ? Math.round((amount / totalExpense) * 100) : 0,
+        color: getCategoryColor(category),
+      }));
     return arr.sort((a, b) => b.amount - a.amount);
   }, [periodTransactions, totalExpense]);
 

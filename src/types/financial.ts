@@ -198,10 +198,24 @@ export interface ManagedFileItem {
   processingStatus: 'waiting' | 'processing' | 'processed' | 'needs_review';
   duplicateStatus: 'none' | 'potential_duplicate' | 'confirmed_duplicate';
   extractedTransactionsCount: number;
+  addedCount?: number;
+  duplicatesMergedCount?: number;
+  needsReviewCount?: number;
+  processingMethod?: string;
   institutionDetected?: string;
   createdAt: string;
   errorDetails?: string;
   isTestFile?: boolean;
+}
+
+export interface ImportBatchSummary {
+  totalFiles: number;
+  processedFiles: number;
+  failedFiles: number;
+  totalFoundTransactions: number;
+  newTransactionsAdded: number;
+  duplicatesMerged: number;
+  needsReviewTransactions: number;
 }
 
 

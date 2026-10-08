@@ -13,6 +13,7 @@ export interface ParseResult {
   totalIncome?: number;
   totalExpense?: number;
   duplicatesSkipped?: number;
+  processingMethod?: string;
 }
 
 // -------------------------------------------------------------
@@ -83,10 +84,11 @@ const CATEGORY_MAP: { keywords: string[]; category: string; type?: TransactionTy
   // Dining & Restaurants
   {
     keywords: [
-      'וולט', 'wolt', 'תן ביס', '10bis', 'קפה', 'ארומה', 'מקדונלדס', 'פיצה', 'גולדה', 'ריבר', 'מסעדה', 'בר', 'פאב',
+      'וולט', 'wolt', 'תן ביס', '10bis', 'קפה', 'ארומה', 'מקדונלדס', 'פיצה', 'גולדה', 'ריבר', 'מסעדה', 'פאב',
       'שווארמה', 'בורגר', 'סושי', 'בלאק', 'bbb', 'לנדוור', 'ארקפה', 'קפית', 'דומינוס', 'גלידה', 'מאפה', 'קופיקס',
       'אגאדיר', 'מוזס', 'ג\'פניקה', 'שגב', 'קפה קפה', 'רולדין', 'לחמים', 'ביגה', 'גרג', 'פאפא ג\'ונס', 'קנטה',
-      'סינמה סיטי', 'יס פלאנט', 'קולנוע', 'הוט סינמה', 'זאפה', 'לב דיזנגוף', 'רב חן', 'בראסרי', 'קפה נואר', 'ביסטרו'
+      'סינמה סיטי', 'יס פלאנט', 'קולנוע', 'הוט סינמה', 'זאפה', 'לב דיזנגוף', 'רב חן', 'בראסרי', 'קפה נואר', 'ביסטרו',
+      'בר'
     ],
     category: 'מסעדות ובילויים',
     type: 'expense'
@@ -172,51 +174,18 @@ const CATEGORY_MAP: { keywords: string[]; category: string; type?: TransactionTy
     category: 'השקעות וחיסכון',
     type: 'investment_contribution'
   },
-  // Salary & Genuine Income (Never assume regular line is income unless explicit evidence)
-  {
-    keywords: [
-      'משכורת', 'שכר', 'העברת שכר', 'שכר חודשי', 'משכורת חודשית', 'זיכוי שכר', 'שכר עבודה', 'ביטוח לאומי',
-      'קצבה', 'קצבת ילדים', 'קצבת זקנה', 'קצבת נכות', 'דמי לידה', 'דמי אבטלה', 'הפקדת צ\'ק', 'הפקדת שיק', 'הפקדת שק',
-      'הפקדת מזומן', 'הפקדה לעו"ש', 'הפקדה עצמית', 'דיבידנד', 'ריבית זכות', 'החזר מס', 'תקבול', 'תקבולים',
-      'בונוס', 'מענק', 'מלגה', 'תשלום מלקוח', 'הכנסה עצמאית', 'תקבול מ-'
-    ],
-    category: 'משכורת והכנסות',
-    type: 'income'
-  },
-  // Refunds & Credits (Refund decreases expenses; NOT counted as regular income!)
-  {
-    keywords: [
-      'זיכוי', 'החזר כספי', 'ביטול עסקה', 'החזר חיוב', 'זיכוי עסקה', 'זיכוי כרטיס', 'refund', 'reversal', 'החזר דמי'
-    ],
-    category: 'החזרים וזיכויים',
-    type: 'refund'
-  },
-  // Cash & ATM Withdrawals (Crucial: ATM cash withdrawal is an EXPENSE, NOT a transfer!)
-  {
-    keywords: [
-      'משיכת מזומן', 'משיכה בכספומט', 'כספומט', 'בנקומט', 'משיכה במכשיר', 'משיכת מזומנים', 'משיכת שיק עצמי', 'משיכה אוטומטית'
-    ],
-    category: 'משיכת מזומן',
-    type: 'expense'
-  },
-  // Credit Card Repayments in Bank Statement (Internal Transfer to avoid double-counting card expenses!)
-  {
-    keywords: [
-      'חיוב כרטיס', 'פירעון כרטיס', 'חיוב ויזה', 'חיוב ישראכרט', 'חיוב כאל', 'חיוב מקס', 'חיוב מאסטרקארד',
-      'חיוב לאומי קארד', 'הוראת קבע כרטיס אשראי', 'חיוב ח-ן כרטיס', 'הוראת קבע ויזה', 'הוראת קבע ישראכרט'
-    ],
-    category: 'פירעון כרטיס אשראי',
-    type: 'transfer'
-  },
-  // Inter-account Transfers (Between owner's accounts)
-  {
-    keywords: [
-      'העברה בין חשבונות', 'העברה עצמית', 'העברה מחשבון', 'העברה לחשבון', 'העברה לחיסכון', 'העברה מחיסכון', 'העברה לפיקדון'
-    ],
-    category: 'העברות ומזומן',
-    type: 'transfer'
-  }
 ];
+
+// Helper to safely check keyword matches with word boundaries for short words
+export function matchesKeyword(text: string, kw: string): boolean {
+  const kwLower = kw.toLowerCase();
+  const textLower = text.toLowerCase();
+  if (kwLower.length <= 3) {
+    const words = textLower.split(/[\s,.\-_/\\()]+/);
+    return words.includes(kwLower);
+  }
+  return textLower.includes(kwLower);
+}
 
 // Helper to check user learned rules with absolute precedence
 export function matchLearnedRule(
@@ -240,16 +209,11 @@ export function matchLearnedRule(
         return rule;
       }
     } else {
-      // similar or all_similar: substring or token overlap
-      if (
-        mClean.includes(pat) ||
-        pat.includes(mClean) ||
-        combined.includes(pat)
-      ) {
+      if (matchesKeyword(combined, pat) || matchesKeyword(mClean, pat)) {
         return rule;
       }
 
-      // Check primary words (e.g. "Bit" in "Bit - תשלום")
+      // Check multi-word phrase
       const patWords = pat.split(/\s+/).filter((w) => w.length > 1);
       if (patWords.length > 0 && patWords.every((w) => combined.includes(w))) {
         return rule;
@@ -290,12 +254,13 @@ export function categorizeMerchant(
 
   const combined = `${merchant} ${description}`.toLowerCase();
 
-  // 2. ATM Cash Withdrawal Check (High priority: do NOT treat as transfer)
+  // 2. ATM Cash Withdrawal Check (High priority: ALWAYS expense, NOT transfer!)
   if (
     combined.includes('כספומט') ||
     combined.includes('בנקומט') ||
     combined.includes('משיכת מזומן') ||
-    combined.includes('משיכה במכשיר')
+    combined.includes('משיכה במכשיר') ||
+    combined.includes('משיכת מזומנים')
   ) {
     return {
       category: 'משיכת מזומן',
@@ -316,7 +281,8 @@ export function categorizeMerchant(
     combined.includes('חיוב מקס') ||
     combined.includes('חיוב מאסטרקארד') ||
     combined.includes('חיוב לאומי קארד') ||
-    combined.includes('הוראת קבע כרטיס אשראי')
+    combined.includes('הוראת קבע כרטיס אשראי') ||
+    combined.includes('חיוב ח-ן כרטיס')
   ) {
     return {
       category: 'פירעון כרטיס אשראי',
@@ -332,7 +298,10 @@ export function categorizeMerchant(
     combined.includes('העברה בין חשבונות') ||
     combined.includes('העברה עצמית') ||
     combined.includes('העברה מחשבון') ||
-    combined.includes('העברה לחשבון')
+    combined.includes('העברה לחשבון') ||
+    combined.includes('העברה לחיסכון') ||
+    combined.includes('העברה מחיסכון') ||
+    combined.includes('העברה לפיקדון')
   ) {
     return {
       category: 'העברות ומזומן',
@@ -343,12 +312,13 @@ export function categorizeMerchant(
     };
   }
 
-  // 5. Refunds & Credits Check
+  // 5. Refunds & Credits Check (Refund decreases expenses, never counted as regular income!)
   if (
     (combined.includes('זיכוי') && !combined.includes('זיכוי שכר')) ||
     combined.includes('החזר כספי') ||
     combined.includes('ביטול עסקה') ||
     combined.includes('החזר חיוב') ||
+    combined.includes('זיכוי כרטיס') ||
     combined.includes('refund') ||
     combined.includes('reversal')
   ) {
@@ -361,7 +331,7 @@ export function categorizeMerchant(
     };
   }
 
-  // 6. Real Income Check (Salary, allowances, pensions, dividends)
+  // 6. Real Income Check (Salary, allowances, pensions, dividends, check deposits)
   if (
     combined.includes('משכורת') ||
     combined.includes('שכר עבודה') ||
@@ -379,8 +349,11 @@ export function categorizeMerchant(
     combined.includes('הפקדת שיק') ||
     combined.includes('הפקדת שק') ||
     combined.includes('הפקדת מזומן') ||
+    combined.includes('הפקדה לעו"ש') ||
+    combined.includes('הפקדה עצמית') ||
     combined.includes('דיבידנד') ||
     combined.includes('ריבית זכות') ||
+    combined.includes('החזר מס') ||
     combined.includes('תקבול') ||
     combined.includes('תקבולים') ||
     combined.includes('בונוס') ||
@@ -395,19 +368,10 @@ export function categorizeMerchant(
     };
   }
 
-  // Helper for word-boundary matching especially for short 2-3 letter words
-  const matchesKeyword = (text: string, kw: string): boolean => {
-    if (kw.length <= 3) {
-      const words = text.split(/[\s,.\-_/\\()]+/);
-      return words.includes(kw);
-    }
-    return text.includes(kw);
-  };
-
   // 7. General Categories mapping
   for (const rule of CATEGORY_MAP) {
     for (const kw of rule.keywords) {
-      if (matchesKeyword(combined, kw.toLowerCase())) {
+      if (matchesKeyword(combined, kw)) {
         return {
           category: rule.category,
           type: rule.type || 'expense',
@@ -419,7 +383,7 @@ export function categorizeMerchant(
     }
   }
 
-  // 7. Fallback: conservative classification with needsReview flag
+  // 8. Fallback: conservative classification with needsReview flag
   return {
     category: 'אחר / ללא סיווג',
     type: 'expense',
@@ -430,7 +394,7 @@ export function categorizeMerchant(
 }
 
 // -------------------------------------------------------------
-// 3. ROBUST DATE NORMALIZATION
+// 3. ROBUST DATE & STRING NORMALIZATION
 // -------------------------------------------------------------
 const HEBREW_MONTHS: Record<string, string> = {
   'ינואר': '01', 'ינו': '01',
@@ -447,20 +411,42 @@ const HEBREW_MONTHS: Record<string, string> = {
   'דצמבר': '12', 'דצמ': '12',
 };
 
+export function cleanFinancialString(raw: any): string {
+  if (raw === null || raw === undefined) return '';
+  return String(raw)
+    .replace(/[\u200E\u200F\u202A-\u202E\uFEFF\u200B\u200C\u200D]/g, '')
+    .replace(/\u00A0/g, ' ')
+    .trim();
+}
+
+export function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = '';
+  const bytes = new Uint8Array(buffer);
+  const len = bytes.byteLength;
+  const chunkSize = 8192;
+  for (let i = 0; i < len; i += chunkSize) {
+    const chunk = bytes.subarray(i, Math.min(i + chunkSize, len));
+    binary += String.fromCharCode.apply(null, chunk as unknown as number[]);
+  }
+  return btoa(binary);
+}
+
 export function normalizeDate(raw: any): string | null {
   if (raw === null || raw === undefined) return null;
 
-  // 1. If Date object
   if (raw instanceof Date) {
     if (!isNaN(raw.getTime())) {
-      return raw.toISOString().split('T')[0];
+      const y = raw.getFullYear();
+      const m = String(raw.getMonth() + 1).padStart(2, '0');
+      const d = String(raw.getDate()).padStart(2, '0');
+      return `${y}-${m}-${d}`;
     }
+    return null;
   }
 
-  // 2. If Excel serial number (e.g. 45396)
+  // Excel serial number (e.g. 45396)
   if (typeof raw === 'number') {
     if (raw > 20000 && raw < 70000) {
-      // Excel epoch 1899-12-30
       const date = new Date(Math.round((raw - 25569) * 86400 * 1000));
       if (!isNaN(date.getTime())) {
         return date.toISOString().split('T')[0];
@@ -468,13 +454,17 @@ export function normalizeDate(raw: any): string | null {
     }
   }
 
-  const str = String(raw).trim();
+  let str = cleanFinancialString(raw);
   if (!str) return null;
+
+  // Strip wrapping quotes, brackets
+  str = str.replace(/^["'([{]+|[)"'\]}]+$/g, '').trim();
 
   // Strip timestamps e.g. "2024-05-14 10:20:30" or "14/05/2024 10:20"
   const cleanStr = str.replace(/T.*$/, '').split(/\s+/)[0];
+  if (!cleanStr) return null;
 
-  // Regex ISO: YYYY-MM-DD
+  // Regex ISO: YYYY-MM-DD or YYYY/MM/DD or YYYY.MM.DD
   const isoMatch = cleanStr.match(/^(\d{4})[-/.](0?[1-9]|1[0-2])[-/.](0?[1-9]|[12]\d|3[01])$/);
   if (isoMatch) {
     const y = isoMatch[1];
@@ -492,12 +482,34 @@ export function normalizeDate(raw: any): string | null {
     return `${y}-${m}-${d}`;
   }
 
-  // Regex DD/MM/YY (2-digit year)
+  // Regex DD/MM/YY (2-digit year e.g. 15.02.26, 15/02/26, 15-02-26)
   const dmyShortMatch = cleanStr.match(/^(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](\d{2})$/);
   if (dmyShortMatch) {
     const d = dmyShortMatch[1].padStart(2, '0');
     const m = dmyShortMatch[2].padStart(2, '0');
     let y = parseInt(dmyShortMatch[3], 10);
+    y = y < 50 ? 2000 + y : 1900 + y;
+    return `${y}-${m}-${d}`;
+  }
+
+  // Compact 8-digit date: YYYYMMDD
+  const compactYmd = cleanStr.match(/^(\d{4})(0[1-9]|1[0-2])(0[1-9]|[12]\d|3[01])$/);
+  if (compactYmd) {
+    return `${compactYmd[1]}-${compactYmd[2]}-${compactYmd[3]}`;
+  }
+
+  // Compact 8-digit date: DDMMYYYY
+  const compactDmy = cleanStr.match(/^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])(\d{4})$/);
+  if (compactDmy) {
+    return `${compactDmy[3]}-${compactDmy[2]}-${compactDmy[1]}`;
+  }
+
+  // Compact 6-digit date: DDMMYY
+  const compactDmyShort = cleanStr.match(/^(0[1-9]|[12]\d|3[01])(0[1-9]|1[0-2])(\d{2})$/);
+  if (compactDmyShort) {
+    const d = compactDmyShort[1];
+    const m = compactDmyShort[2];
+    let y = parseInt(compactDmyShort[3], 10);
     y = y < 50 ? 2000 + y : 1900 + y;
     return `${y}-${m}-${d}`;
   }
@@ -524,15 +536,15 @@ export function normalizeDate(raw: any): string | null {
 export function parseIsraeliAmount(raw: any): { amount: number; isNegative: boolean } | null {
   if (raw === null || raw === undefined) return null;
   if (typeof raw === 'number') {
-    if (isNaN(raw)) return null;
+    if (isNaN(raw) || raw === 0) return null;
     return {
       amount: Math.abs(raw),
       isNegative: raw < 0,
     };
   }
 
-  let s = String(raw).trim();
-  if (!s || s === '-' || s === '--') return null;
+  let s = cleanFinancialString(raw);
+  if (!s || s === '-' || s === '--' || s === '0' || s === '0.00' || s === '0.0') return null;
 
   let isNegative = false;
   // Parentheses check e.g. (1,250.00)
@@ -540,6 +552,16 @@ export function parseIsraeliAmount(raw: any): { amount: number; isNegative: bool
     isNegative = true;
     s = s.slice(1, -1);
   }
+
+  // Hebrew debit/credit indicators
+  if (s.includes('חובה')) {
+    isNegative = true;
+    s = s.replace(/חובה/g, '');
+  }
+  if (s.includes('זכות') || s.includes('זיכוי')) {
+    s = s.replace(/זכות|זיכוי/g, '');
+  }
+
   // Trailing or leading minus e.g. -150 or 150-
   if (s.includes('-')) {
     isNegative = true;
@@ -549,10 +571,12 @@ export function parseIsraeliAmount(raw: any): { amount: number; isNegative: bool
   // Handle European comma/dot if e.g. 1.234,56
   if (/^\d{1,3}(?:\.\d{3})+,\d{2}$/.test(s)) {
     s = s.replace(/\./g, '').replace(',', '.');
+  } else if (/^\d+,\d{2}$/.test(s)) {
+    s = s.replace(',', '.');
   }
 
-  // Remove currency signs and spaces
-  s = s.replace(/[₪$€,\s]/g, '').replace(/ש"?ח/g, '').replace(/NIS/gi, '').replace(/ILS/gi, '');
+  // Remove currency signs, thousand-separator commas, quotes and spaces
+  s = s.replace(/[₪$€,\s"']/g, '').replace(/ש"?ח/g, '').replace(/NIS/gi, '').replace(/ILS/gi, '');
 
   const val = parseFloat(s);
   if (isNaN(val) || val === 0) return null;
@@ -561,6 +585,118 @@ export function parseIsraeliAmount(raw: any): { amount: number; isNegative: bool
     amount: Math.abs(val),
     isNegative,
   };
+}
+
+// -------------------------------------------------------------
+// 5. TEXT ENCODING DECODER (Handles Windows-1255, UTF-8, BOM)
+// -------------------------------------------------------------
+export async function decodeTextBuffer(buffer: ArrayBuffer): Promise<string> {
+  const bytes = new Uint8Array(buffer);
+
+  // 1. Check for UTF-8 BOM (0xEF, 0xBB, 0xBF)
+  if (bytes.length >= 3 && bytes[0] === 0xef && bytes[1] === 0xbb && bytes[2] === 0xbf) {
+    try {
+      const decoded = new TextDecoder('utf-8').decode(bytes.slice(3));
+      return cleanFinancialString(decoded);
+    } catch {
+      // fallback
+    }
+  }
+
+  // 2. Check for UTF-16 LE BOM (0xFF, 0xFE) or BE BOM (0xFE, 0xFF)
+  if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xfe) {
+    try {
+      const decoded = new TextDecoder('utf-16le').decode(bytes.slice(2));
+      return cleanFinancialString(decoded);
+    } catch {
+      // fallback
+    }
+  }
+  if (bytes.length >= 2 && bytes[0] === 0xfe && bytes[1] === 0xff) {
+    try {
+      const decoded = new TextDecoder('utf-16be').decode(bytes.slice(2));
+      return cleanFinancialString(decoded);
+    } catch {
+      // fallback
+    }
+  }
+
+  // 3. Try decoding as strict UTF-8
+  let isStrictUtf8 = false;
+  let utf8Text = '';
+  try {
+    const utf8Decoder = new TextDecoder('utf-8', { fatal: true });
+    utf8Text = utf8Decoder.decode(bytes);
+    isStrictUtf8 = true;
+  } catch {
+    isStrictUtf8 = false;
+  }
+
+  // If strict UTF-8 decoded successfully AND contains Hebrew letters:
+  if (isStrictUtf8 && /[\u0590-\u05FF]/.test(utf8Text)) {
+    return cleanFinancialString(utf8Text);
+  }
+
+  // 4. Try Windows-1255 decoder (Standard Israeli bank / credit card encoding: Isracard, Max, Cal, Hapoalim)
+  try {
+    const win1255Decoder = new TextDecoder('windows-1255');
+    const win1255Text = win1255Decoder.decode(bytes);
+    if (/[\u0590-\u05FF]/.test(win1255Text)) {
+      return cleanFinancialString(win1255Text);
+    }
+  } catch {
+    // Windows-1255 TextDecoder not available
+  }
+
+  // 5. Try ISO-8859-8 (Hebrew)
+  try {
+    const iso88598Decoder = new TextDecoder('iso-8859-8');
+    const isoText = iso88598Decoder.decode(bytes);
+    if (/[\u0590-\u05FF]/.test(isoText)) {
+      return cleanFinancialString(isoText);
+    }
+  } catch {
+    // ignore
+  }
+
+  // 6. Manual single-byte Hebrew decoding fallback (Windows-1255 mapping):
+  // In Windows-1255:
+  // Bytes 0xE0 through 0xFA (224-250) correspond to Hebrew letters א-ת (1488-1514).
+  // 0xA5 is ₪, 0xDF is ׳, 0x9E is ״.
+  let hasHebrewBytes = false;
+  for (let i = 0; i < Math.min(bytes.length, 50000); i++) {
+    if (bytes[i] >= 0xe0 && bytes[i] <= 0xfa) {
+      hasHebrewBytes = true;
+      break;
+    }
+  }
+
+  if (hasHebrewBytes) {
+    let manualStr = '';
+    for (let i = 0; i < bytes.length; i++) {
+      const b = bytes[i];
+      if (b >= 0xe0 && b <= 0xfa) {
+        manualStr += String.fromCharCode(b - 0xe0 + 0x05d0);
+      } else if (b === 0xa5) {
+        manualStr += '₪';
+      } else if (b === 0xdf) {
+        manualStr += '׳';
+      } else if (b === 0x9e) {
+        manualStr += '״';
+      } else {
+        manualStr += String.fromCharCode(b);
+      }
+    }
+    return cleanFinancialString(manualStr);
+  }
+
+  // 7. If strict UTF-8 decoded without error
+  if (isStrictUtf8) {
+    return cleanFinancialString(utf8Text);
+  }
+
+  // 8. Fallback to standard UTF-8 (non-fatal)
+  return cleanFinancialString(utf8Text || new TextDecoder('utf-8').decode(bytes));
 }
 
 // -------------------------------------------------------------
@@ -663,7 +799,311 @@ function buildTransactionObject(params: {
 }
 
 // -------------------------------------------------------------
-// 5. EXCEL PARSER (Spreadsheets: .xlsx, .xls, .xlsm, .xlsb, .ods)
+// UNIFIED SPREADSHEET & CSV ROW EXTRACTOR
+// -------------------------------------------------------------
+export function extractTransactionsFromRawRows(
+  rawRows: any[][],
+  sourceFileName: string,
+  defaultInstitutionName?: string
+): { transactions: Transaction[]; detectedInst: string } {
+  if (!rawRows || rawRows.length < 2) {
+    return { transactions: [], detectedInst: defaultInstitutionName || 'לא זוהה' };
+  }
+
+  const headerSnippet = rawRows.slice(0, 20).map((r) => r.join(' ')).join(' ');
+  const institutionInfo = detectInstitution(headerSnippet, sourceFileName);
+  const detectedInst = defaultInstitutionName || institutionInfo.name;
+
+  const allTransactions: Transaction[] = [];
+
+  let activeDateCol = -1;
+  let activeBillingDateCol = -1;
+  let activeDescCol = -1;
+  let activeAmountCol = -1;
+  let activeBillingAmountCol = -1;
+  let activeDebitCol = -1;
+  let activeCreditCol = -1;
+  let activeCategoryCol = -1;
+  let activeRefCol = -1;
+
+  for (let r = 0; r < rawRows.length; r++) {
+    const row = rawRows[r].map((cell) => cleanFinancialString(cell));
+    if (row.length === 0 || row.every((c) => !c)) continue;
+
+    // Check if row is a section header row
+    let fDate = -1;
+    let fBillingDate = -1;
+    let fDesc = -1;
+    let fAmount = -1;
+    let fBillingAmount = -1;
+    let fDebit = -1;
+    let fCredit = -1;
+    let fCat = -1;
+    let fRef = -1;
+
+    row.forEach((colText, idx) => {
+      const t = colText.toLowerCase();
+
+      // 1. Billing / Value date
+      if (
+        t.includes('תאריך חיוב') ||
+        t.includes('תאריך החיוב') ||
+        t.includes('מועד חיוב') ||
+        t.includes('מועד החיוב') ||
+        t.includes('ת.חיוב') ||
+        t.includes('תאריך ערך') ||
+        t.includes('תאריך הערך') ||
+        t.includes('מועד ערך') ||
+        t.includes('ת.ערך') ||
+        t.includes('billing date') ||
+        t.includes('value date') ||
+        t.includes('due date')
+      ) {
+        fBillingDate = idx;
+      }
+      // 2. Transaction / Purchase date
+      else if (
+        t.includes('תאריך רכישה') ||
+        t.includes('תאריך קניה') ||
+        t.includes('מועד רכישה') ||
+        t.includes('מועד עסקה') ||
+        t.includes('תאריך פעולה') ||
+        t.includes('תאריך ביצוע') ||
+        t.includes('תאריך עסקה') ||
+        t.includes('תאריך העסקה') ||
+        t.includes('ת.עסקה') ||
+        t.includes('ת.רכישה') ||
+        t.includes('תאריך רישום') ||
+        t.includes('תאריך הצגה') ||
+        t.includes('תאריך') ||
+        t === 'date' ||
+        t === 'transaction date' ||
+        t === 'יום'
+      ) {
+        fDate = idx;
+      }
+      // 3. Merchant / Description
+      else if (
+        t.includes('שם בית עסק') ||
+        t.includes('שם בית העסק') ||
+        t.includes('שם ספק') ||
+        t.includes('שם העסק') ||
+        t.includes('בית עסק') ||
+        t.includes('פרטי עסקה') ||
+        t.includes('פרטי פעולה') ||
+        t.includes('פירוט פעולה') ||
+        t.includes('פירוט עסקה') ||
+        t.includes('פירוט') ||
+        t.includes('תיאור') ||
+        t.includes('פעולה') ||
+        t.includes('שם הפעולה') ||
+        t.includes('תיאור הפעולה') ||
+        t.includes('פרטים') ||
+        t.includes('ספק') ||
+        t.includes('merchant') ||
+        t.includes('description') ||
+        t.includes('details')
+      ) {
+        fDesc = idx;
+      }
+      // 4. Debit column
+      else if (
+        t.includes('חובה') ||
+        t.includes('סכום חובה') ||
+        t.includes('משיכה') ||
+        t === 'debit'
+      ) {
+        fDebit = idx;
+      }
+      // 5. Credit column
+      else if (
+        t.includes('זכות') ||
+        t.includes('סכום זכות') ||
+        t.includes('זיכוי') ||
+        t.includes('הפקדה') ||
+        t.includes('הכנסה') ||
+        t === 'credit' ||
+        t === 'deposit'
+      ) {
+        fCredit = idx;
+      }
+      // 6. Billing amount (Actual ILS charge on Israeli cards)
+      else if (
+        t.includes('סכום חיוב') ||
+        t.includes('סכום לחיוב') ||
+        t.includes('סכום לתשלום') ||
+        t.includes('סכום בפועל') ||
+        t.includes('סכום בש"ח') ||
+        t.includes('סכום בשח') ||
+        t.includes('סכום חיוב בש"ח') ||
+        t.includes('סכום חיוב בשח') ||
+        t.includes('billing amount')
+      ) {
+        fBillingAmount = idx;
+      }
+      // 7. Original / General amount
+      else if (
+        t.includes('סכום עסקה') ||
+        t.includes('סכום בעסקה') ||
+        t.includes('סכום מקורי') ||
+        t.includes('סכום עסקה מקורי') ||
+        t.includes('סכום') ||
+        t === 'amount'
+      ) {
+        fAmount = idx;
+      }
+      // 8. Category / Sector
+      else if (
+        t.includes('קטגוריה') ||
+        t.includes('ענף') ||
+        t.includes('סוג עסקה') ||
+        t.includes('סוג פעולה') ||
+        t.includes('category')
+      ) {
+        fCat = idx;
+      }
+      // 9. Reference / Voucher
+      else if (
+        t.includes('אסמכתא') ||
+        t.includes('שובר') ||
+        t.includes('מספר שובר') ||
+        t.includes('מספר אסמכתא') ||
+        t.includes('ref') ||
+        t.includes('voucher')
+      ) {
+        fRef = idx;
+      }
+    });
+
+    // If row matches header criteria, update active mappings
+    if (
+      (fDate !== -1 || fBillingDate !== -1) &&
+      (fDesc !== -1 || fAmount !== -1 || fBillingAmount !== -1 || fDebit !== -1 || fCredit !== -1)
+    ) {
+      activeDateCol = fDate !== -1 ? fDate : fBillingDate;
+      activeBillingDateCol = fBillingDate;
+      if (fDesc !== -1) activeDescCol = fDesc;
+      if (fBillingAmount !== -1) activeBillingAmountCol = fBillingAmount;
+      if (fAmount !== -1) activeAmountCol = fAmount;
+      if (fDebit !== -1) activeDebitCol = fDebit;
+      if (fCredit !== -1) activeCreditCol = fCredit;
+      if (fCat !== -1) activeCategoryCol = fCat;
+      if (fRef !== -1) activeRefCol = fRef;
+      continue;
+    }
+
+    // Skip summary or title rows
+    const rowStr = row.join(' ');
+    if (
+      rowStr.includes('סה"כ') ||
+      rowStr.includes('סך הכל') ||
+      rowStr.includes('יתרה לתשלום') ||
+      rowStr.includes('סה״כ') ||
+      rowStr.includes('סך חיוב לחשבון') ||
+      rowStr.includes('סך חיוב חודשי')
+    ) {
+      continue;
+    }
+
+    // Heuristic deduction if no header mapped yet
+    if (
+      activeDateCol === -1 ||
+      (activeAmountCol === -1 && activeBillingAmountCol === -1 && activeDebitCol === -1 && activeCreditCol === -1)
+    ) {
+      let pDate = -1;
+      let pAmt = -1;
+      row.forEach((cell, idx) => {
+        if (normalizeDate(cell) && pDate === -1) pDate = idx;
+        else if (parseIsraeliAmount(cell) && pAmt === -1) pAmt = idx;
+      });
+      if (pDate !== -1 && pAmt !== -1) {
+        activeDateCol = pDate;
+        activeAmountCol = pAmt;
+        activeDescCol = pDate === 0 ? 1 : 0;
+      } else {
+        continue;
+      }
+    }
+
+    // Process transaction data row
+    const rawDate = row[activeDateCol];
+    const normalizedDate = normalizeDate(rawDate);
+    if (!normalizedDate) continue;
+
+    const rawBillingDate = activeBillingDateCol !== -1 ? row[activeBillingDateCol] : null;
+    const normalizedBillingDate = rawBillingDate ? normalizeDate(rawBillingDate) : undefined;
+
+    const rawDesc = activeDescCol !== -1 ? String(row[activeDescCol] || '').trim() : '';
+    const rawCategory = activeCategoryCol !== -1 ? String(row[activeCategoryCol] || '').trim() : '';
+    const rawRef = activeRefCol !== -1 ? String(row[activeRefCol] || '').trim() : '';
+
+    let txAmount = 0;
+    let isCreditRow = false;
+    let isDebitRow = false;
+    let amountIsNegative = false;
+    let foundValidAmount = false;
+
+    // Check Debit / Credit columns
+    if (activeDebitCol !== -1 || activeCreditCol !== -1) {
+      const debitVal = activeDebitCol !== -1 ? parseIsraeliAmount(row[activeDebitCol]) : null;
+      const creditVal = activeCreditCol !== -1 ? parseIsraeliAmount(row[activeCreditCol]) : null;
+
+      if (creditVal && creditVal.amount > 0) {
+        txAmount = creditVal.amount;
+        isCreditRow = true;
+        foundValidAmount = true;
+      } else if (debitVal && debitVal.amount > 0) {
+        txAmount = debitVal.amount;
+        isDebitRow = true;
+        foundValidAmount = true;
+      }
+    }
+
+    // Check Billing Amount column (priority in Israeli cards)
+    if (!foundValidAmount && activeBillingAmountCol !== -1) {
+      const parsedBilling = parseIsraeliAmount(row[activeBillingAmountCol]);
+      if (parsedBilling && parsedBilling.amount > 0) {
+        txAmount = parsedBilling.amount;
+        amountIsNegative = parsedBilling.isNegative;
+        foundValidAmount = true;
+      }
+    }
+
+    // Check Original / General Amount column
+    if (!foundValidAmount && activeAmountCol !== -1) {
+      const parsedAmount = parseIsraeliAmount(row[activeAmountCol]);
+      if (parsedAmount && parsedAmount.amount > 0) {
+        txAmount = parsedAmount.amount;
+        amountIsNegative = parsedAmount.isNegative;
+        foundValidAmount = true;
+      }
+    }
+
+    if (!foundValidAmount || txAmount === 0) continue;
+
+    const tx = buildTransactionObject({
+      date: normalizedDate,
+      billingDate: normalizedBillingDate,
+      amount: txAmount,
+      merchant: rawDesc || rawCategory || 'עסקה ללא פירוט',
+      description: rawDesc,
+      rawCategory,
+      ref: rawRef,
+      isCreditRow,
+      isDebitRow,
+      amountIsNegative,
+      institutionInfo,
+      sourceFileName,
+    });
+
+    allTransactions.push(tx);
+  }
+
+  return { transactions: allTransactions, detectedInst };
+}
+
+// -------------------------------------------------------------
+// 6. EXCEL PARSER (Spreadsheets: .xlsx, .xls, .xlsm, .xlsb, .ods)
 // -------------------------------------------------------------
 export async function parseExcelFile(file: File): Promise<ParseResult> {
   try {
@@ -682,7 +1122,6 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
     const allTransactions: Transaction[] = [];
     let detectedInstName = '';
 
-    // Search across sheets
     for (const sheetName of workbook.SheetNames) {
       const sheet = workbook.Sheets[sheetName];
       if (!sheet) continue;
@@ -693,200 +1132,9 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         defval: '',
       });
 
-      if (!rawRows || rawRows.length < 2) continue;
-
-      // Extract raw text from top rows to identify institution
-      const headerSnippet = rawRows.slice(0, 10).map((r) => r.join(' ')).join(' ');
-      const institutionInfo = detectInstitution(headerSnippet, file.name);
-      if (!detectedInstName) detectedInstName = institutionInfo.name;
-
-      // Find Header Row
-      let headerRowIndex = -1;
-      let dateCol = -1;
-      let billingDateCol = -1;
-      let descCol = -1;
-      let amountCol = -1;
-      let debitCol = -1;
-      let creditCol = -1;
-      let categoryCol = -1;
-      let refCol = -1;
-
-      for (let r = 0; r < Math.min(rawRows.length, 30); r++) {
-        const row = rawRows[r].map((cell) => String(cell || '').trim());
-
-        let foundDate = -1;
-        let foundBillingDate = -1;
-        let foundDesc = -1;
-        let foundAmount = -1;
-        let foundDebit = -1;
-        let foundCredit = -1;
-
-        row.forEach((colText, idx) => {
-          const t = colText.toLowerCase();
-          if (
-            t.includes('תאריך חיוב') ||
-            t.includes('ת.חיוב') ||
-            t.includes('תאריך ערך') ||
-            t.includes('ת.ערך') ||
-            t.includes('billing date') ||
-            t.includes('value date')
-          ) {
-            foundBillingDate = idx;
-          } else if (
-            t.includes('תאריך') ||
-            t.includes('ת.עסקה') ||
-            t.includes('תאריך עסקה') ||
-            t === 'date'
-          ) {
-            foundDate = idx;
-          } else if (
-            t.includes('תיאור') ||
-            t.includes('פרטים') ||
-            t.includes('בית עסק') ||
-            t.includes('שם בית עסק') ||
-            t.includes('פעולה') ||
-            t.includes('שם בית העסק') ||
-            t.includes('merchant') ||
-            t.includes('description')
-          ) {
-            foundDesc = idx;
-          } else if (
-            t.includes('חובה') ||
-            t.includes('סכום חיוב') ||
-            t.includes('חיוב') ||
-            t === 'debit'
-          ) {
-            foundDebit = idx;
-          } else if (
-            t.includes('זכות') ||
-            t.includes('סכום זיכוי') ||
-            t.includes('זיכוי') ||
-            t.includes('הפקדה') ||
-            t.includes('הכנסה') ||
-            t === 'credit'
-          ) {
-            foundCredit = idx;
-          } else if (
-            t.includes('סכום') ||
-            t.includes('סכום עסקה') ||
-            t === 'amount'
-          ) {
-            foundAmount = idx;
-          } else if (t.includes('קטגוריה') || t.includes('ענף') || t === 'category') {
-            categoryCol = idx;
-          } else if (t.includes('אסמכתא') || t.includes('מספר שובר') || t.includes('ref')) {
-            refCol = idx;
-          }
-        });
-
-        // A valid header row must have at least Date + (Desc or Amount)
-        if (
-          (foundDate !== -1 || foundBillingDate !== -1) &&
-          (foundDesc !== -1 || foundAmount !== -1 || foundDebit !== -1 || foundCredit !== -1)
-        ) {
-          headerRowIndex = r;
-          dateCol = foundDate !== -1 ? foundDate : foundBillingDate;
-          billingDateCol = foundBillingDate !== -1 ? foundBillingDate : -1;
-          descCol = foundDesc;
-          amountCol = foundAmount;
-          debitCol = foundDebit;
-          creditCol = foundCredit;
-          break;
-        }
-      }
-
-      // If no explicit header, deduce columns from data rows
-      if (headerRowIndex === -1) {
-        for (let r = 0; r < Math.min(rawRows.length, 10); r++) {
-          const row = rawRows[r];
-          if (!row || row.length < 2) continue;
-          let possibleDateCol = -1;
-          let possibleAmountCol = -1;
-
-          row.forEach((cell, idx) => {
-            if (normalizeDate(cell) && possibleDateCol === -1) possibleDateCol = idx;
-            else if (parseIsraeliAmount(cell) && possibleAmountCol === -1) possibleAmountCol = idx;
-          });
-
-          if (possibleDateCol !== -1 && possibleAmountCol !== -1) {
-            headerRowIndex = r - 1;
-            dateCol = possibleDateCol;
-            amountCol = possibleAmountCol;
-            descCol = possibleDateCol === 0 ? 1 : 0;
-            break;
-          }
-        }
-      }
-
-      if (headerRowIndex === -1 && dateCol === -1) continue;
-
-      // Parse data rows
-      for (let r = Math.max(0, headerRowIndex + 1); r < rawRows.length; r++) {
-        const row = rawRows[r];
-        if (!row || row.length === 0) continue;
-
-        const rawDate = row[dateCol];
-        const normalizedDate = normalizeDate(rawDate);
-        if (!normalizedDate) continue; // Skip non-data rows
-
-        const rawBillingDate = billingDateCol !== -1 ? row[billingDateCol] : null;
-        const normalizedBillingDate = rawBillingDate ? normalizeDate(rawBillingDate) : undefined;
-
-        const rawDesc = descCol !== -1 ? String(row[descCol] || '').trim() : '';
-        const rawCategory = categoryCol !== -1 ? String(row[categoryCol] || '').trim() : '';
-        const rawRef = refCol !== -1 ? String(row[refCol] || '').trim() : '';
-
-        let txAmount = 0;
-        let isCreditRow = false;
-        let isDebitRow = false;
-        let amountIsNegative = false;
-        let foundValidAmount = false;
-
-        // Check Debit vs Credit columns first
-        if (debitCol !== -1 || creditCol !== -1) {
-          const debitVal = debitCol !== -1 ? parseIsraeliAmount(row[debitCol]) : null;
-          const creditVal = creditCol !== -1 ? parseIsraeliAmount(row[creditCol]) : null;
-
-          if (creditVal && creditVal.amount > 0) {
-            txAmount = creditVal.amount;
-            isCreditRow = true;
-            foundValidAmount = true;
-          } else if (debitVal && debitVal.amount > 0) {
-            txAmount = debitVal.amount;
-            isDebitRow = true;
-            foundValidAmount = true;
-          }
-        }
-
-        // Check unified amount column
-        if (!foundValidAmount && amountCol !== -1) {
-          const parsedAmount = parseIsraeliAmount(row[amountCol]);
-          if (parsedAmount && parsedAmount.amount > 0) {
-            txAmount = parsedAmount.amount;
-            amountIsNegative = parsedAmount.isNegative;
-            foundValidAmount = true;
-          }
-        }
-
-        if (!foundValidAmount || txAmount === 0) continue;
-
-        const tx = buildTransactionObject({
-          date: normalizedDate,
-          billingDate: normalizedBillingDate,
-          amount: txAmount,
-          merchant: rawDesc || rawCategory || 'עסקה ללא פירוט',
-          description: rawDesc,
-          rawCategory,
-          ref: rawRef,
-          isCreditRow,
-          isDebitRow,
-          amountIsNegative,
-          institutionInfo,
-          sourceFileName: file.name,
-        });
-
-        allTransactions.push(tx);
-      }
+      const { transactions, detectedInst } = extractTransactionsFromRawRows(rawRows, file.name, detectedInstName);
+      if (!detectedInstName) detectedInstName = detectedInst;
+      allTransactions.push(...transactions);
     }
 
     if (allTransactions.length === 0) {
@@ -898,13 +1146,13 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
       };
     }
 
-    // Sort by date descending (newest on top)
     allTransactions.sort((a, b) => b.date.localeCompare(a.date));
 
     return {
       success: true,
       transactions: allTransactions,
       institution: detectedInstName || 'קובץ אקסל',
+      processingMethod: 'פענוח גיליון אלקטרוני (SheetJS)',
       earliestDate: allTransactions[allTransactions.length - 1].date,
       latestDate: allTransactions[0].date,
       totalIncome: allTransactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
@@ -921,27 +1169,59 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
 }
 
 // -------------------------------------------------------------
-// 6. CSV & DELIMITED TEXT PARSER (.csv, .tsv, .txt)
+// 7. ROBUST CSV & DELIMITED TEXT PARSER (.csv, .tsv, .txt)
 // -------------------------------------------------------------
 export async function parseCsvFile(file: File): Promise<ParseResult> {
   try {
-    let text = await file.text();
+    const arrayBuffer = await file.arrayBuffer();
+    const text = await decodeTextBuffer(arrayBuffer);
+    const cleanText = cleanFinancialString(text);
 
-    // Check if garbled Hebrew and decode with Windows-1255 if needed
-    if (text.includes('') || /[\u0080-\u00FF]/.test(text)) {
-      try {
-        const buffer = await file.arrayBuffer();
-        const decoder = new TextDecoder('windows-1255');
-        const decoded = decoder.decode(buffer);
-        if (/[\u0590-\u05FF]/.test(decoded)) {
-          text = decoded;
+    // 1. Primary engine: Parse via SheetJS string mode with shared rawRows extractor
+    // (Ensures 100% feature and transaction parity with XLSX exports!)
+    try {
+      const workbook = XLSX.read(cleanText, { type: 'string', raw: false });
+      if (workbook.SheetNames && workbook.SheetNames.length > 0) {
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        if (sheet) {
+          const rawRows: any[][] = XLSX.utils.sheet_to_json(sheet, {
+            header: 1,
+            raw: false,
+            defval: '',
+          });
+
+          const { transactions, detectedInst } = extractTransactionsFromRawRows(rawRows, file.name);
+          if (transactions.length > 0) {
+            transactions.sort((a, b) => b.date.localeCompare(a.date));
+            return {
+              success: true,
+              transactions,
+              institution: detectedInst || 'קובץ CSV',
+              processingMethod: 'פענוח CSV מובנה (SheetJS)',
+              earliestDate: transactions[transactions.length - 1].date,
+              latestDate: transactions[0].date,
+              totalIncome: transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
+              totalExpense: transactions.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0),
+            };
+          }
         }
-      } catch {
-        // keep utf-8
       }
+    } catch {
+      // continue to secondary line-by-line engine
     }
 
-    return parseCsvContent(text, file.name);
+    // 2. Secondary engine: Line-by-line custom delimited text scanner
+    const secondaryResult = parseCsvContent(cleanText, file.name);
+    if (secondaryResult.success && secondaryResult.transactions.length > 0) {
+      return secondaryResult;
+    }
+
+    return {
+      success: false,
+      transactions: [],
+      institution: secondaryResult.institution || 'קובץ CSV',
+      error: secondaryResult.error || 'לא זוהו עסקאות תקינות בקובץ ה-CSV. אנא ודא כי הקובץ מכיל עמודות תאריך, בית עסק וסכום.',
+    };
   } catch (err) {
     return {
       success: false,
@@ -953,7 +1233,7 @@ export async function parseCsvFile(file: File): Promise<ParseResult> {
 }
 
 export function parseCsvContent(text: string, fileName: string): ParseResult {
-  const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  const lines = text.split(/\r\n|\r|\n/).map((l) => l.trim()).filter(Boolean);
   if (lines.length < 2) {
     return {
       success: false,
@@ -963,17 +1243,36 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
     };
   }
 
-  // Detect Delimiter: comma, tab, semicolon, pipe
-  const sample = lines.slice(0, 10).join('\n');
-  const commaCount = (sample.match(/,/g) || []).length;
-  const tabCount = (sample.match(/\t/g) || []).length;
-  const semiCount = (sample.match(/;/g) || []).length;
-  const pipeCount = (sample.match(/\|/g) || []).length;
+  // 1. Detect Delimiter across non-empty lines with content
+  const delimiters = [',', ';', '\t', '|'];
+  const candidateLines = lines.filter((l) => l.length > 10).slice(0, 60);
 
-  let delimiter = ',';
-  if (tabCount > commaCount && tabCount > semiCount) delimiter = '\t';
-  else if (semiCount > commaCount) delimiter = ';';
-  else if (pipeCount > commaCount) delimiter = '|';
+  let bestDelim = ',';
+  let bestScore = -1;
+
+  for (const d of delimiters) {
+    const counts = candidateLines.map((line) => {
+      let c = 0;
+      let inQuotes = false;
+      for (let i = 0; i < line.length; i++) {
+        if (line[i] === '"') inQuotes = !inQuotes;
+        else if (line[i] === d && !inQuotes) c++;
+      }
+      return c;
+    });
+
+    const nonZero = counts.filter((c) => c > 0);
+    if (nonZero.length > 0) {
+      const avg = nonZero.reduce((a, b) => a + b, 0) / nonZero.length;
+      const score = nonZero.length * (avg > 1 ? avg : 0.5);
+      if (score > bestScore) {
+        bestScore = score;
+        bestDelim = d;
+      }
+    }
+  }
+
+  const delimiter = bestDelim;
 
   const parseLine = (line: string): string[] => {
     const result: string[] = [];
@@ -985,137 +1284,199 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
       if (char === '"') {
         inQuotes = !inQuotes;
       } else if (char === delimiter && !inQuotes) {
-        result.push(current.trim().replace(/^"|"$/g, ''));
+        result.push(cleanFinancialString(current.replace(/^"|"$/g, '')));
         current = '';
       } else {
         current += char;
       }
     }
-    result.push(current.trim().replace(/^"|"$/g, ''));
+    result.push(cleanFinancialString(current.replace(/^"|"$/g, '')));
     return result;
   };
 
   const institutionInfo = detectInstitution(text, fileName);
+  const transactions: Transaction[] = [];
 
-  // Find Header Line
-  let headerIndex = -1;
-  let dateCol = -1;
-  let billingDateCol = -1;
-  let descCol = -1;
-  let amountCol = -1;
-  let debitCol = -1;
-  let creditCol = -1;
-  let categoryCol = -1;
-  let refCol = -1;
+  let activeDateCol = -1;
+  let activeBillingDateCol = -1;
+  let activeDescCol = -1;
+  let activeAmountCol = -1;
+  let activeBillingAmountCol = -1;
+  let activeDebitCol = -1;
+  let activeCreditCol = -1;
+  let activeCategoryCol = -1;
+  let activeRefCol = -1;
 
-  for (let i = 0; i < Math.min(lines.length, 35); i++) {
+  for (let i = 0; i < lines.length; i++) {
     const cols = parseLine(lines[i]);
+    if (cols.length <= 1) continue;
+
+    // Check if line is a header row
     let fDate = -1;
     let fBillingDate = -1;
     let fDesc = -1;
     let fAmount = -1;
+    let fBillingAmount = -1;
     let fDebit = -1;
     let fCredit = -1;
+    let fCat = -1;
+    let fRef = -1;
 
     cols.forEach((col, idx) => {
       const c = col.toLowerCase();
       if (
         c.includes('תאריך חיוב') ||
+        c.includes('תאריך החיוב') ||
+        c.includes('מועד חיוב') ||
+        c.includes('מועד החיוב') ||
         c.includes('ת.חיוב') ||
         c.includes('תאריך ערך') ||
+        c.includes('תאריך הערך') ||
+        c.includes('מועד ערך') ||
         c.includes('ת.ערך') ||
         c.includes('billing date') ||
-        c.includes('value date')
+        c.includes('value date') ||
+        c.includes('due date')
       ) {
         fBillingDate = idx;
-      } else if (c.includes('תאריך') || c.includes('date') || c.includes('ת.עסקה')) {
+      } else if (
+        c.includes('תאריך רכישה') ||
+        c.includes('תאריך קניה') ||
+        c.includes('מועד רכישה') ||
+        c.includes('מועד עסקה') ||
+        c.includes('תאריך פעולה') ||
+        c.includes('תאריך ביצוע') ||
+        c.includes('תאריך עסקה') ||
+        c.includes('תאריך העסקה') ||
+        c.includes('ת.עסקה') ||
+        c.includes('ת.רכישה') ||
+        c.includes('תאריך רישום') ||
+        c.includes('תאריך הצגה') ||
+        c.includes('תאריך') ||
+        c === 'date' ||
+        c === 'transaction date' ||
+        c === 'יום'
+      ) {
         fDate = idx;
       } else if (
-        c.includes('תיאור') ||
-        c.includes('פרטים') ||
+        c.includes('שם בית עסק') ||
+        c.includes('שם בית העסק') ||
+        c.includes('שם ספק') ||
+        c.includes('שם העסק') ||
         c.includes('בית עסק') ||
+        c.includes('פרטי עסקה') ||
+        c.includes('פרטי פעולה') ||
+        c.includes('פירוט פעולה') ||
+        c.includes('פירוט עסקה') ||
+        c.includes('פירוט') ||
+        c.includes('תיאור') ||
         c.includes('פעולה') ||
+        c.includes('שם הפעולה') ||
+        c.includes('תיאור הפעולה') ||
+        c.includes('פרטים') ||
+        c.includes('ספק') ||
         c.includes('merchant') ||
-        c.includes('description')
+        c.includes('description') ||
+        c.includes('business')
       ) {
         fDesc = idx;
-      } else if (c.includes('חובה') || c.includes('חיוב') || c === 'debit') {
+      } else if (
+        c.includes('חובה') ||
+        c.includes('סכום חובה') ||
+        c.includes('משיכה') ||
+        c === 'debit'
+      ) {
         fDebit = idx;
       } else if (
         c.includes('זכות') ||
+        c.includes('סכום זכות') ||
         c.includes('זיכוי') ||
         c.includes('הפקדה') ||
         c.includes('הכנסה') ||
         c === 'credit'
       ) {
         fCredit = idx;
-      } else if (c.includes('סכום') || c === 'amount') {
+      } else if (
+        c.includes('סכום חיוב') ||
+        c.includes('סכום לחיוב') ||
+        c.includes('סכום לתשלום') ||
+        c.includes('סכום בפועל') ||
+        c.includes('סכום בש"ח') ||
+        c.includes('סכום בשח') ||
+        c.includes('סכום חיוב בש"ח') ||
+        c.includes('סכום חיוב בשח')
+      ) {
+        fBillingAmount = idx;
+      } else if (
+        c.includes('סכום עסקה') ||
+        c.includes('סכום בעסקה') ||
+        c.includes('סכום מקורי') ||
+        c.includes('סכום עסקה מקורי') ||
+        c.includes('סכום') ||
+        c === 'amount'
+      ) {
         fAmount = idx;
-      } else if (c.includes('קטגוריה') || c.includes('ענף')) {
-        categoryCol = idx;
-      } else if (c.includes('אסמכתא') || c.includes('שובר')) {
-        refCol = idx;
+      } else if (c.includes('קטגוריה') || c.includes('ענף') || c.includes('סוג עסקה')) {
+        fCat = idx;
+      } else if (c.includes('אסמכתא') || c.includes('שובר') || c.includes('מספר שובר') || c.includes('ref')) {
+        fRef = idx;
       }
     });
 
     if (
       (fDate !== -1 || fBillingDate !== -1) &&
-      (fDesc !== -1 || fAmount !== -1 || fDebit !== -1 || fCredit !== -1)
+      (fDesc !== -1 || fAmount !== -1 || fBillingAmount !== -1 || fDebit !== -1 || fCredit !== -1)
     ) {
-      headerIndex = i;
-      dateCol = fDate !== -1 ? fDate : fBillingDate;
-      billingDateCol = fBillingDate !== -1 ? fBillingDate : -1;
-      descCol = fDesc;
-      amountCol = fAmount;
-      debitCol = fDebit;
-      creditCol = fCredit;
-      break;
+      activeDateCol = fDate !== -1 ? fDate : fBillingDate;
+      activeBillingDateCol = fBillingDate;
+      if (fDesc !== -1) activeDescCol = fDesc;
+      if (fBillingAmount !== -1) activeBillingAmountCol = fBillingAmount;
+      if (fAmount !== -1) activeAmountCol = fAmount;
+      if (fDebit !== -1) activeDebitCol = fDebit;
+      if (fCredit !== -1) activeCreditCol = fCredit;
+      if (fCat !== -1) activeCategoryCol = fCat;
+      if (fRef !== -1) activeRefCol = fRef;
+      continue;
     }
-  }
 
-  // Heuristic deduction if header wasn't found by text
-  if (headerIndex === -1) {
-    for (let i = 0; i < Math.min(lines.length, 10); i++) {
-      const cols = parseLine(lines[i]);
-      if (cols.length < 2) continue;
+    // Skip summary lines
+    const lineStr = lines[i];
+    if (
+      lineStr.includes('סה"כ') ||
+      lineStr.includes('סך הכל') ||
+      lineStr.includes('יתרה לתשלום') ||
+      lineStr.includes('סה״כ') ||
+      lineStr.includes('סך חיוב לחשבון')
+    ) {
+      continue;
+    }
+
+    // Heuristic deduction if no header mapped yet
+    if (
+      activeDateCol === -1 ||
+      (activeAmountCol === -1 && activeBillingAmountCol === -1 && activeDebitCol === -1 && activeCreditCol === -1)
+    ) {
       let pDate = -1;
       let pAmt = -1;
-
       cols.forEach((col, idx) => {
         if (normalizeDate(col) && pDate === -1) pDate = idx;
         else if (parseIsraeliAmount(col) && pAmt === -1) pAmt = idx;
       });
-
       if (pDate !== -1 && pAmt !== -1) {
-        headerIndex = i - 1;
-        dateCol = pDate;
-        amountCol = pAmt;
-        descCol = pDate === 0 ? 1 : 0;
-        break;
+        activeDateCol = pDate;
+        activeAmountCol = pAmt;
+        activeDescCol = pDate === 0 ? 1 : 0;
+      } else {
+        continue;
       }
     }
-  }
 
-  if (headerIndex === -1 && dateCol === -1) {
-    return {
-      success: false,
-      transactions: [],
-      institution: institutionInfo.name,
-      error: 'לא זוהו כותרות עמודות תקינות (תאריך, תיאור, סכום) בקובץ ה-CSV.',
-    };
-  }
-
-  const transactions: Transaction[] = [];
-
-  for (let i = Math.max(0, headerIndex + 1); i < lines.length; i++) {
-    const cols = parseLine(lines[i]);
-    if (cols.length <= 1) continue;
-
-    const rawDate = cols[dateCol];
+    // Extract transaction
+    const rawDate = cols[activeDateCol];
     const normalizedDate = normalizeDate(rawDate);
     if (!normalizedDate) continue;
 
-    const rawBillingDate = billingDateCol !== -1 ? cols[billingDateCol] : null;
+    const rawBillingDate = activeBillingDateCol !== -1 ? cols[activeBillingDateCol] : null;
     const normalizedBillingDate = rawBillingDate ? normalizeDate(rawBillingDate) : undefined;
 
     let txAmount = 0;
@@ -1124,9 +1485,9 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
     let amountIsNegative = false;
     let foundValidAmount = false;
 
-    if (debitCol !== -1 || creditCol !== -1) {
-      const debitParsed = debitCol !== -1 ? parseIsraeliAmount(cols[debitCol]) : null;
-      const creditParsed = creditCol !== -1 ? parseIsraeliAmount(cols[creditCol]) : null;
+    if (activeDebitCol !== -1 || activeCreditCol !== -1) {
+      const debitParsed = activeDebitCol !== -1 ? parseIsraeliAmount(cols[activeDebitCol]) : null;
+      const creditParsed = activeCreditCol !== -1 ? parseIsraeliAmount(cols[activeCreditCol]) : null;
 
       if (creditParsed && creditParsed.amount > 0) {
         txAmount = creditParsed.amount;
@@ -1139,8 +1500,17 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
       }
     }
 
-    if (!foundValidAmount && amountCol !== -1) {
-      const parsed = parseIsraeliAmount(cols[amountCol]);
+    if (!foundValidAmount && activeBillingAmountCol !== -1) {
+      const parsedBilling = parseIsraeliAmount(cols[activeBillingAmountCol]);
+      if (parsedBilling && parsedBilling.amount > 0) {
+        txAmount = parsedBilling.amount;
+        amountIsNegative = parsedBilling.isNegative;
+        foundValidAmount = true;
+      }
+    }
+
+    if (!foundValidAmount && activeAmountCol !== -1) {
+      const parsed = parseIsraeliAmount(cols[activeAmountCol]);
       if (parsed && parsed.amount > 0) {
         txAmount = parsed.amount;
         amountIsNegative = parsed.isNegative;
@@ -1150,9 +1520,9 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
 
     if (!foundValidAmount || txAmount === 0) continue;
 
-    const merchantName = descCol !== -1 && cols[descCol] ? cols[descCol].trim() : 'עסקה ללא שם';
-    const rawCategory = categoryCol !== -1 && cols[categoryCol] ? cols[categoryCol].trim() : '';
-    const rawRef = refCol !== -1 && cols[refCol] ? cols[refCol].trim() : '';
+    const merchantName = activeDescCol !== -1 && cols[activeDescCol] ? cols[activeDescCol].trim() : 'עסקה ללא שם';
+    const rawCategory = activeCategoryCol !== -1 && cols[activeCategoryCol] ? cols[activeCategoryCol].trim() : '';
+    const rawRef = activeRefCol !== -1 && cols[activeRefCol] ? cols[activeRefCol].trim() : '';
 
     const tx = buildTransactionObject({
       date: normalizedDate,
@@ -1187,6 +1557,7 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
     success: true,
     transactions,
     institution: institutionInfo.name,
+    processingMethod: 'פענוח CSV סמנטי חכם',
     earliestDate: transactions[transactions.length - 1].date,
     latestDate: transactions[0].date,
     totalIncome: transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
@@ -1195,25 +1566,12 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
 }
 
 // -------------------------------------------------------------
-// 7. HTML TABLE PARSER (.html, .htm, or HTML disguised as .xls)
+// 8. HTML TABLE PARSER (.html, .htm, or HTML disguised as .xls)
 // -------------------------------------------------------------
 export async function parseHtmlFile(file: File): Promise<ParseResult> {
   try {
-    let text = await file.text();
-
-    if (/[\u0080-\u00FF]/.test(text) && !/[\u0590-\u05FF]/.test(text)) {
-      try {
-        const buffer = await file.arrayBuffer();
-        const decoder = new TextDecoder('windows-1255');
-        const decoded = decoder.decode(buffer);
-        if (/[\u0590-\u05FF]/.test(decoded)) {
-          text = decoded;
-        }
-      } catch {
-        // keep text
-      }
-    }
-
+    const arrayBuffer = await file.arrayBuffer();
+    const text = await decodeTextBuffer(arrayBuffer);
     return parseHtmlContent(text, file.name);
   } catch (err) {
     return {
@@ -1226,179 +1584,195 @@ export async function parseHtmlFile(file: File): Promise<ParseResult> {
 }
 
 export function parseHtmlContent(html: string, fileName: string): ParseResult {
-  const parser = new DOMParser();
-  const doc = parser.parseFromString(html, 'text/html');
-  const tables = Array.from(doc.querySelectorAll('table'));
+  // Polyfill or native DOMParser
+  let doc: Document;
+  if (typeof DOMParser !== 'undefined') {
+    const parser = new DOMParser();
+    doc = parser.parseFromString(html, 'text/html');
+  } else {
+    // Regex based mock for non-browser / test environments
+    return parseCsvContent(html.replace(/<[^>]+>/g, ','), fileName);
+  }
 
+  const tables = Array.from(doc.querySelectorAll('table'));
   if (tables.length === 0) {
     return parseCsvContent(doc.body?.textContent || html, fileName);
   }
 
-  // Find table with most rows
-  let bestTable = tables[0];
-  let maxRows = 0;
-  for (const t of tables) {
-    const rowCount = t.querySelectorAll('tr').length;
-    if (rowCount > maxRows) {
-      maxRows = rowCount;
-      bestTable = t;
-    }
-  }
-
-  const trs = Array.from(bestTable.querySelectorAll('tr'));
-  if (trs.length < 2) {
-    return {
-      success: false,
-      transactions: [],
-      institution: 'לא זוהה',
-      error: 'טבלת הנתונים ב-HTML ריקה.',
-    };
-  }
-
   const institutionInfo = detectInstitution(doc.body?.textContent || html, fileName);
+  const allTransactions: Transaction[] = [];
 
-  let headerIndex = -1;
-  let dateCol = -1;
-  let billingDateCol = -1;
-  let descCol = -1;
-  let amountCol = -1;
-  let debitCol = -1;
-  let creditCol = -1;
-  let categoryCol = -1;
-  let refCol = -1;
+  // Evaluate all tables in HTML
+  for (const table of tables) {
+    const trs = Array.from(table.querySelectorAll('tr'));
+    if (trs.length < 2) continue;
 
-  for (let i = 0; i < Math.min(trs.length, 30); i++) {
-    const cells = Array.from(trs[i].querySelectorAll('th, td')).map((c) => (c.textContent || '').trim());
-    let fDate = -1;
-    let fBillingDate = -1;
-    let fDesc = -1;
-    let fAmount = -1;
-    let fDebit = -1;
-    let fCredit = -1;
+    let dateCol = -1;
+    let billingDateCol = -1;
+    let descCol = -1;
+    let amountCol = -1;
+    let debitCol = -1;
+    let creditCol = -1;
+    let categoryCol = -1;
+    let refCol = -1;
 
-    cells.forEach((text, idx) => {
-      const t = text.toLowerCase();
-      if (t.includes('תאריך חיוב') || t.includes('ת.חיוב') || t.includes('billing date')) fBillingDate = idx;
-      else if (t.includes('תאריך') || t.includes('ת.עסקה') || t === 'date') fDate = idx;
-      else if (t.includes('תיאור') || t.includes('פרטים') || t.includes('בית עסק') || t.includes('פעולה') || t.includes('merchant')) fDesc = idx;
-      else if (t.includes('חובה') || t.includes('חיוב') || t === 'debit') fDebit = idx;
-      else if (t.includes('זכות') || t.includes('זיכוי') || t.includes('הפקדה') || t.includes('הכנסה') || t === 'credit') fCredit = idx;
-      else if (t.includes('סכום') || t === 'amount') fAmount = idx;
-      else if (t.includes('קטגוריה') || t.includes('ענף')) categoryCol = idx;
-      else if (t.includes('אסמכתא') || t.includes('שובר')) refCol = idx;
-    });
+    let headerIndex = -1;
 
-    if ((fDate !== -1 || fBillingDate !== -1) && (fDesc !== -1 || fAmount !== -1 || fDebit !== -1 || fCredit !== -1)) {
-      headerIndex = i;
-      dateCol = fDate !== -1 ? fDate : fBillingDate;
-      billingDateCol = fBillingDate;
-      descCol = fDesc;
-      amountCol = fAmount;
-      debitCol = fDebit;
-      creditCol = fCredit;
-      break;
+    for (let i = 0; i < Math.min(trs.length, 30); i++) {
+      const cells = Array.from(trs[i].querySelectorAll('th, td')).map((c) => (c.textContent || '').trim());
+      let fDate = -1;
+      let fBillingDate = -1;
+      let fDesc = -1;
+      let fAmount = -1;
+      let fDebit = -1;
+      let fCredit = -1;
+
+      cells.forEach((text, idx) => {
+        const t = text.toLowerCase();
+        if (
+          t.includes('תאריך חיוב') ||
+          t.includes('מועד חיוב') ||
+          t.includes('ת.חיוב') ||
+          t.includes('billing date') ||
+          t.includes('value date')
+        ) {
+          fBillingDate = idx;
+        } else if (
+          t.includes('תאריך רכישה') ||
+          t.includes('תאריך עסקה') ||
+          t.includes('מועד רכישה') ||
+          t.includes('ת.עסקה') ||
+          t.includes('תאריך') ||
+          t === 'date'
+        ) {
+          fDate = idx;
+        } else if (
+          t.includes('שם בית עסק') ||
+          t.includes('בית עסק') ||
+          t.includes('שם ספק') ||
+          t.includes('תיאור') ||
+          t.includes('פרטים') ||
+          t.includes('פעולה') ||
+          t.includes('merchant') ||
+          t.includes('description')
+        ) {
+          fDesc = idx;
+        } else if (t.includes('חובה') || t.includes('חיוב') || t === 'debit') {
+          fDebit = idx;
+        } else if (t.includes('זכות') || t.includes('זיכוי') || t.includes('הפקדה') || t.includes('הכנסה') || t === 'credit') {
+          fCredit = idx;
+        } else if (t.includes('סכום') || t === 'amount') {
+          fAmount = idx;
+        } else if (t.includes('קטגוריה') || t.includes('ענף')) {
+          categoryCol = idx;
+        } else if (t.includes('אסמכתא') || t.includes('שובר')) {
+          refCol = idx;
+        }
+      });
+
+      if ((fDate !== -1 || fBillingDate !== -1) && (fDesc !== -1 || fAmount !== -1 || fDebit !== -1 || fCredit !== -1)) {
+        headerIndex = i;
+        dateCol = fDate !== -1 ? fDate : fBillingDate;
+        billingDateCol = fBillingDate;
+        descCol = fDesc;
+        amountCol = fAmount;
+        debitCol = fDebit;
+        creditCol = fCredit;
+        break;
+      }
     }
-  }
 
-  // Heuristic deduction if header row missing
-  if (headerIndex === -1) {
-    for (let i = 0; i < Math.min(trs.length, 10); i++) {
-      const cells = Array.from(trs[i].querySelectorAll('td')).map((c) => (c.textContent || '').trim());
-      if (cells.length >= 2) {
-        let pDate = -1;
-        let pAmt = -1;
-        cells.forEach((c, idx) => {
-          if (normalizeDate(c) && pDate === -1) pDate = idx;
-          else if (parseIsraeliAmount(c) && pAmt === -1) pAmt = idx;
-        });
-        if (pDate !== -1 && pAmt !== -1) {
-          headerIndex = i - 1;
-          dateCol = pDate;
-          amountCol = pAmt;
-          descCol = pDate === 0 ? 1 : 0;
-          break;
+    // Heuristic deduction if header row missing
+    if (headerIndex === -1) {
+      for (let i = 0; i < Math.min(trs.length, 10); i++) {
+        const cells = Array.from(trs[i].querySelectorAll('td')).map((c) => (c.textContent || '').trim());
+        if (cells.length >= 2) {
+          let pDate = -1;
+          let pAmt = -1;
+          cells.forEach((c, idx) => {
+            if (normalizeDate(c) && pDate === -1) pDate = idx;
+            else if (parseIsraeliAmount(c) && pAmt === -1) pAmt = idx;
+          });
+          if (pDate !== -1 && pAmt !== -1) {
+            headerIndex = i - 1;
+            dateCol = pDate;
+            amountCol = pAmt;
+            descCol = pDate === 0 ? 1 : 0;
+            break;
+          }
         }
       }
     }
-  }
 
-  if (headerIndex === -1 && dateCol === -1) {
-    return {
-      success: false,
-      transactions: [],
-      institution: institutionInfo.name,
-      error: 'לא זוהו עמודות תקינות (תאריך, תיאור, סכום) בטבלת ה-HTML.',
-    };
-  }
+    if (headerIndex === -1 && dateCol === -1) continue;
 
-  const transactions: Transaction[] = [];
+    for (let i = Math.max(0, headerIndex + 1); i < trs.length; i++) {
+      const cells = Array.from(trs[i].querySelectorAll('td')).map((c) => (c.textContent || '').trim());
+      if (cells.length < 2) continue;
 
-  for (let i = Math.max(0, headerIndex + 1); i < trs.length; i++) {
-    const cells = Array.from(trs[i].querySelectorAll('td')).map((c) => (c.textContent || '').trim());
-    if (cells.length < 2) continue;
+      const rawDate = cells[dateCol];
+      const normalizedDate = normalizeDate(rawDate);
+      if (!normalizedDate) continue;
 
-    const rawDate = cells[dateCol];
-    const normalizedDate = normalizeDate(rawDate);
-    if (!normalizedDate) continue;
+      const rawBillingDate = billingDateCol !== -1 ? cells[billingDateCol] : null;
+      const normalizedBillingDate = rawBillingDate ? normalizeDate(rawBillingDate) : undefined;
 
-    const rawBillingDate = billingDateCol !== -1 ? cells[billingDateCol] : null;
-    const normalizedBillingDate = rawBillingDate ? normalizeDate(rawBillingDate) : undefined;
+      let txAmount = 0;
+      let isCreditRow = false;
+      let isDebitRow = false;
+      let amountIsNegative = false;
+      let foundValidAmount = false;
 
-    let txAmount = 0;
-    let isCreditRow = false;
-    let isDebitRow = false;
-    let amountIsNegative = false;
-    let foundValidAmount = false;
+      if (debitCol !== -1 || creditCol !== -1) {
+        const debitParsed = debitCol !== -1 ? parseIsraeliAmount(cells[debitCol]) : null;
+        const creditParsed = creditCol !== -1 ? parseIsraeliAmount(cells[creditCol]) : null;
 
-    if (debitCol !== -1 || creditCol !== -1) {
-      const debitParsed = debitCol !== -1 ? parseIsraeliAmount(cells[debitCol]) : null;
-      const creditParsed = creditCol !== -1 ? parseIsraeliAmount(cells[creditCol]) : null;
-
-      if (creditParsed && creditParsed.amount > 0) {
-        txAmount = creditParsed.amount;
-        isCreditRow = true;
-        foundValidAmount = true;
-      } else if (debitParsed && debitParsed.amount > 0) {
-        txAmount = debitParsed.amount;
-        isDebitRow = true;
-        foundValidAmount = true;
+        if (creditParsed && creditParsed.amount > 0) {
+          txAmount = creditParsed.amount;
+          isCreditRow = true;
+          foundValidAmount = true;
+        } else if (debitParsed && debitParsed.amount > 0) {
+          txAmount = debitParsed.amount;
+          isDebitRow = true;
+          foundValidAmount = true;
+        }
       }
-    }
 
-    if (!foundValidAmount && amountCol !== -1) {
-      const parsed = parseIsraeliAmount(cells[amountCol]);
-      if (parsed && parsed.amount > 0) {
-        txAmount = parsed.amount;
-        amountIsNegative = parsed.isNegative;
-        foundValidAmount = true;
+      if (!foundValidAmount && amountCol !== -1) {
+        const parsed = parseIsraeliAmount(cells[amountCol]);
+        if (parsed && parsed.amount > 0) {
+          txAmount = parsed.amount;
+          amountIsNegative = parsed.isNegative;
+          foundValidAmount = true;
+        }
       }
+
+      if (!foundValidAmount || txAmount === 0) continue;
+
+      const merchantName = descCol !== -1 && cells[descCol] ? cells[descCol].trim() : 'עסקה ללא שם';
+      const rawCategory = categoryCol !== -1 && cells[categoryCol] ? cells[categoryCol].trim() : '';
+      const rawRef = refCol !== -1 && cells[refCol] ? cells[refCol].trim() : '';
+
+      const tx = buildTransactionObject({
+        date: normalizedDate,
+        billingDate: normalizedBillingDate,
+        amount: txAmount,
+        merchant: merchantName,
+        description: merchantName,
+        rawCategory,
+        ref: rawRef,
+        isCreditRow,
+        isDebitRow,
+        amountIsNegative,
+        institutionInfo,
+        sourceFileName: fileName,
+      });
+
+      allTransactions.push(tx);
     }
-
-    if (!foundValidAmount || txAmount === 0) continue;
-
-    const merchantName = descCol !== -1 && cells[descCol] ? cells[descCol].trim() : 'עסקה ללא שם';
-    const rawCategory = categoryCol !== -1 && cells[categoryCol] ? cells[categoryCol].trim() : '';
-    const rawRef = refCol !== -1 && cells[refCol] ? cells[refCol].trim() : '';
-
-    const tx = buildTransactionObject({
-      date: normalizedDate,
-      billingDate: normalizedBillingDate,
-      amount: txAmount,
-      merchant: merchantName,
-      description: merchantName,
-      rawCategory,
-      ref: rawRef,
-      isCreditRow,
-      isDebitRow,
-      amountIsNegative,
-      institutionInfo,
-      sourceFileName: fileName,
-    });
-
-    transactions.push(tx);
   }
 
-  if (transactions.length === 0) {
+  if (allTransactions.length === 0) {
     return {
       success: false,
       transactions: [],
@@ -1407,21 +1781,22 @@ export function parseHtmlContent(html: string, fileName: string): ParseResult {
     };
   }
 
-  transactions.sort((a, b) => b.date.localeCompare(a.date));
+  allTransactions.sort((a, b) => b.date.localeCompare(a.date));
 
   return {
     success: true,
-    transactions,
+    transactions: allTransactions,
     institution: institutionInfo.name,
-    earliestDate: transactions[transactions.length - 1].date,
-    latestDate: transactions[0].date,
-    totalIncome: transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
-    totalExpense: transactions.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0),
+    processingMethod: 'פענוח HTML טבלאי',
+    earliestDate: allTransactions[allTransactions.length - 1].date,
+    latestDate: allTransactions[0].date,
+    totalIncome: allTransactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
+    totalExpense: allTransactions.filter((t) => t.type === 'expense').reduce((s, t) => s + t.amount, 0),
   };
 }
 
 // -------------------------------------------------------------
-// 8. OFX / QFX PARSER
+// 9. OFX / QFX / XML PARSER
 // -------------------------------------------------------------
 export function parseOfxContent(text: string, fileName: string): ParseResult {
   const institutionInfo = detectInstitution(text, fileName);
@@ -1483,6 +1858,7 @@ export function parseOfxContent(text: string, fileName: string): ParseResult {
     success: true,
     transactions,
     institution: institutionInfo.name,
+    processingMethod: 'פענוח OFX/QFX ישיר',
     earliestDate: transactions[transactions.length - 1].date,
     latestDate: transactions[0].date,
     totalIncome: transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
@@ -1491,7 +1867,7 @@ export function parseOfxContent(text: string, fileName: string): ParseResult {
 }
 
 // -------------------------------------------------------------
-// 9. JSON PARSER
+// 10. JSON PARSER
 // -------------------------------------------------------------
 export function parseJsonContent(text: string, fileName: string): ParseResult {
   try {
@@ -1597,6 +1973,7 @@ export function parseJsonContent(text: string, fileName: string): ParseResult {
       success: true,
       transactions,
       institution: institutionInfo.name,
+      processingMethod: 'פענוח JSON ישיר',
       earliestDate: transactions[transactions.length - 1].date,
       latestDate: transactions[0].date,
       totalIncome: transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
@@ -1613,18 +1990,30 @@ export function parseJsonContent(text: string, fileName: string): ParseResult {
 }
 
 // -------------------------------------------------------------
-// 10. ZIP ARCHIVE PARSER
+// 11. ZIP ARCHIVE PARSER
 // -------------------------------------------------------------
 export async function parseZipFile(file: File): Promise<ParseResult> {
   try {
     const jszip = new JSZip();
-    const zip = await jszip.loadAsync(file);
+    let zip: JSZip;
+    try {
+      zip = await jszip.loadAsync(file);
+    } catch (zipLoadErr: any) {
+      if (zipLoadErr && (zipLoadErr.message?.includes('encrypted') || zipLoadErr.message?.includes('password'))) {
+        return {
+          success: false,
+          transactions: [],
+          institution: 'ארכיון ZIP',
+          error: 'קובץ ה-ZIP מוגן בסיסמה. אנא חלץ את הקבצים והעלה אותם ללא הגנת סיסמה.',
+        };
+      }
+      throw zipLoadErr;
+    }
 
     const extractedFiles: { name: string; file: File }[] = [];
 
     for (const [relativePath, zipEntry] of Object.entries(zip.files)) {
       if (zipEntry.dir) continue;
-      // Skip Mac OS metadata files
       if (
         relativePath.startsWith('__MACOSX/') ||
         relativePath.includes('/.DS_Store') ||
@@ -1682,6 +2071,7 @@ export async function parseZipFile(file: File): Promise<ParseResult> {
       success: true,
       transactions: allTransactions,
       institution: Array.from(institutionsFound).join(', ') || 'ארכיון מסמכים',
+      processingMethod: 'חילוץ ועיבוד ארכיון ZIP',
       earliestDate: allTransactions[allTransactions.length - 1].date,
       latestDate: allTransactions[0].date,
       totalIncome: allTransactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
@@ -1699,14 +2089,12 @@ export async function parseZipFile(file: File): Promise<ParseResult> {
 }
 
 // -------------------------------------------------------------
-// 11. IMAGE PARSER (Receipts, Invoices, Slips: JPG, PNG, WEBP)
+// 12. IMAGE PARSER (Receipts, Invoices, Slips: JPG, PNG, WEBP)
 // -------------------------------------------------------------
 export async function parseImageFile(file: File): Promise<ParseResult> {
   try {
     const buffer = await file.arrayBuffer();
-    const base64 = btoa(
-      new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-    );
+    const base64 = arrayBufferToBase64(buffer);
 
     const response = await fetch('/api/ai/parse-document', {
       method: 'POST',
@@ -1745,7 +2133,7 @@ export async function parseImageFile(file: File): Promise<ParseResult> {
       const merchant = String(item.merchant || item.description || 'עסקה').trim();
       const rawCategory = String(item.category || '').trim();
 
-      const tx = buildTransactionObject({
+      return buildTransactionObject({
         date: normalizedDate,
         billingDate: normalizedBillingDate,
         amount: parsedAmount.amount,
@@ -1758,8 +2146,6 @@ export async function parseImageFile(file: File): Promise<ParseResult> {
         institutionInfo: instInfo,
         sourceFileName: file.name,
       });
-
-      return tx;
     });
 
     transactions.sort((a, b) => b.date.localeCompare(a.date));
@@ -1768,6 +2154,7 @@ export async function parseImageFile(file: File): Promise<ParseResult> {
       success: true,
       transactions,
       institution: data.detectedInstitution || instInfo.name,
+      processingMethod: 'OCR חזותי לתמונה (Gemini AI)',
       earliestDate: transactions[transactions.length - 1]?.date,
       latestDate: transactions[0]?.date,
       totalIncome: transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
@@ -1784,14 +2171,12 @@ export async function parseImageFile(file: File): Promise<ParseResult> {
 }
 
 // -------------------------------------------------------------
-// 12. PDF PARSER (Server API with Multimodal & Text Support)
+// 13. PDF PARSER (Server API with Multimodal & Text Support)
 // -------------------------------------------------------------
 export async function parsePdfFile(file: File): Promise<ParseResult> {
   try {
     const buffer = await file.arrayBuffer();
-    const base64 = btoa(
-      new Uint8Array(buffer).reduce((data, byte) => data + String.fromCharCode(byte), '')
-    );
+    const base64 = arrayBufferToBase64(buffer);
 
     const response = await fetch('/api/ai/parse-document', {
       method: 'POST',
@@ -1833,7 +2218,7 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
       const merchant = String(item.merchant || item.description || 'עסקה ללא שם').trim();
       const rawCategory = String(item.category || '').trim();
 
-      const tx = buildTransactionObject({
+      return buildTransactionObject({
         date: normalizedDate,
         billingDate: normalizedBillingDate,
         amount: parsedAmount.amount,
@@ -1846,8 +2231,6 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
         institutionInfo: instInfo,
         sourceFileName: file.name,
       });
-
-      return tx;
     });
 
     transactions.sort((a, b) => b.date.localeCompare(a.date));
@@ -1856,6 +2239,7 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
       success: true,
       transactions,
       institution: data.detectedInstitution || instInfo.name,
+      processingMethod: data.processingMethod || (data.isVisualDocument ? 'OCR חזותי (Gemini AI)' : 'פענוח שכבת טקסט'),
       earliestDate: transactions[transactions.length - 1]?.date,
       latestDate: transactions[0]?.date,
       totalIncome: transactions.filter((t) => t.type === 'income').reduce((s, t) => s + t.amount, 0),
@@ -1873,13 +2257,13 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
 }
 
 // -------------------------------------------------------------
-// 13. MASTER DISPATCHER & FORMAT IDENTIFIER
+// 14. MASTER DISPATCHER & FORMAT IDENTIFIER
 // -------------------------------------------------------------
 export async function parseFinancialDocument(file: File): Promise<ParseResult> {
   const name = file.name.toLowerCase();
 
   // 1. Image formats
-  if (name.match(/\.(jpg|jpeg|png|webp)$/i) || file.type.startsWith('image/')) {
+  if (name.match(/\.(jpg|jpeg|png|webp)$/i) || (file.type && file.type.startsWith('image/'))) {
     return parseImageFile(file);
   }
 
@@ -1899,10 +2283,11 @@ export async function parseFinancialDocument(file: File): Promise<ParseResult> {
     return parsePdfFile(file);
   }
 
-  // 4. HTML tables (including bank exports named .xls that are actually HTML)
+  // 4. HTML tables (including bank exports named .xls or .csv that are actually HTML tables)
   if (
     name.endsWith('.html') ||
     name.endsWith('.htm') ||
+    (file.type && file.type.includes('html')) ||
     prefixTrimmed.toLowerCase().startsWith('<!doctype html') ||
     prefixTrimmed.toLowerCase().startsWith('<html') ||
     prefixTrimmed.toLowerCase().includes('<table')
@@ -1910,22 +2295,25 @@ export async function parseFinancialDocument(file: File): Promise<ParseResult> {
     return parseHtmlFile(file);
   }
 
-  // 5. OFX / QFX
+  // 5. OFX / QFX / XML
   if (
     name.endsWith('.ofx') ||
     name.endsWith('.qfx') ||
+    name.endsWith('.xml') ||
     prefixTrimmed.includes('OFXHEADER') ||
     prefixTrimmed.includes('<OFX>') ||
     prefixTrimmed.includes('<STMTTRN>')
   ) {
-    const text = await file.text();
+    const arrayBuffer = await file.arrayBuffer();
+    const text = await decodeTextBuffer(arrayBuffer);
     return parseOfxContent(text, file.name);
   }
 
   // 6. JSON
   if (name.endsWith('.json') || prefixTrimmed.startsWith('{') || prefixTrimmed.startsWith('[')) {
     try {
-      const text = await file.text();
+      const arrayBuffer = await file.arrayBuffer();
+      const text = await decodeTextBuffer(arrayBuffer);
       return parseJsonContent(text, file.name);
     } catch {
       // not valid json
@@ -1976,12 +2364,12 @@ export async function parseFinancialDocument(file: File): Promise<ParseResult> {
     success: false,
     transactions: [],
     institution: 'פורמט לא נתמך',
-    error: `פורמט הקובץ ${file.name} אינו נתמך. המערכת תומכת ב-Excel, CSV, PDF, HTML, JSON, OFX, XML, תמונות וארכיוני ZIP.`,
+    error: `לא ניתן היה לפענח את הקובץ ${file.name}. המערכת תומכת ב-Excel, CSV, PDF, HTML, JSON, OFX, XML, תמונות וארכיוני ZIP.`,
   };
 }
 
 // -------------------------------------------------------------
-// 14. CONSERVATIVE DEDUPLICATION
+// 15. CONSERVATIVE DEDUPLICATION
 // -------------------------------------------------------------
 export function deduplicateTransactions(
   existingTxs: Transaction[],

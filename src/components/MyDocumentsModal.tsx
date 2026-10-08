@@ -4,6 +4,9 @@ import {
   FileText,
   FileSpreadsheet,
   File,
+  FileCode,
+  Archive,
+  Image as ImageIcon,
   Trash2,
   X,
   AlertTriangle,
@@ -43,11 +46,30 @@ export const MyDocumentsModal: React.FC<MyDocumentsModalProps> = ({
     switch (fileType.toLowerCase()) {
       case 'xlsx':
       case 'xls':
-        return <FileSpreadsheet className="w-5 h-5 text-emerald-400" />;
+      case 'ods':
+        return <FileSpreadsheet className="w-5 h-5 text-emerald-500 dark:text-emerald-400" />;
       case 'csv':
+      case 'tsv':
+      case 'txt':
         return <FileSpreadsheet className="w-5 h-5 text-blue-600 dark:text-blue-400" />;
+      case 'html':
+      case 'htm':
+        return <FileCode className="w-5 h-5 text-indigo-500 dark:text-indigo-400" />;
       case 'pdf':
-        return <FileText className="w-5 h-5 text-rose-400" />;
+        return <FileText className="w-5 h-5 text-rose-500 dark:text-rose-400" />;
+      case 'json':
+      case 'xml':
+      case 'ofx':
+      case 'qfx':
+        return <FileCode className="w-5 h-5 text-amber-500 dark:text-amber-400" />;
+      case 'zip':
+        return <Archive className="w-5 h-5 text-purple-500 dark:text-purple-400" />;
+      case 'image':
+      case 'jpg':
+      case 'jpeg':
+      case 'png':
+      case 'webp':
+        return <ImageIcon className="w-5 h-5 text-cyan-500 dark:text-cyan-400" />;
       default:
         return <File className="w-5 h-5 text-slate-400" />;
     }

@@ -161,7 +161,23 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
 
   const isFileSupported = (file: File): boolean => {
     const fileName = file.name.toLowerCase();
-    return allowedExtensions.some((ext) => fileName.endsWith(ext));
+    const hasAllowedExt = allowedExtensions.some((ext) => fileName.endsWith(ext));
+    if (hasAllowedExt) return true;
+    const mime = (file.type || '').toLowerCase();
+    if (
+      mime.includes('html') ||
+      mime.includes('csv') ||
+      mime.includes('spreadsheet') ||
+      mime.includes('excel') ||
+      mime.includes('pdf') ||
+      mime.includes('json') ||
+      mime.includes('xml') ||
+      mime.includes('zip') ||
+      mime.includes('image/')
+    ) {
+      return true;
+    }
+    return false;
   };
 
   const getFileType = (name: string): ManagedFileItem['fileType'] => {
@@ -527,7 +543,7 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".pdf,.csv,.xlsx,.xls,.xlsm,.xlsb,.ods,.tsv,.txt,.html,.htm,.json,.xml,.ofx,.qfx,.zip,.jpg,.jpeg,.png,.webp"
+          accept=".pdf,.csv,.xlsx,.xls,.xlsm,.xlsb,.ods,.tsv,.txt,.html,.htm,.json,.xml,.ofx,.qfx,.zip,.jpg,.jpeg,.png,.webp,text/html,text/csv,text/plain,application/pdf,application/json,text/xml,application/xml,image/*,application/zip,application/x-zip-compressed,application/vnd.ms-excel,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.oasis.opendocument.spreadsheet"
           onChange={handleFilesSelect}
           className="hidden"
         />
@@ -569,7 +585,7 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
               className="px-3.5 py-1.5 rounded-lg bg-slate-900 hover:bg-slate-800 text-white dark:bg-slate-800 dark:hover:bg-slate-700 dark:text-slate-100 font-medium text-xs transition-colors shadow-xs flex items-center gap-2 cursor-pointer"
             >
               <FileSpreadsheet className="w-4 h-4" />
-              <span>בחר קבצים (יחיד או מרובים)</span>
+              <span>בחר קבצים (Excel, CSV, PDF, HTML, עוד...)</span>
             </button>
 
             <button
@@ -582,10 +598,16 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
             </button>
           </div>
 
-          <div className="flex items-center justify-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 mt-3">
-            <span>פורמטים נתמכים: Excel (.xlsx, .xls, .ods), CSV/TSV, PDF (כולל סרוק), HTML, JSON, OFX, תמונות (JPG, PNG) ו-ZIP</span>
-            <span>•</span>
-            <span>ללא מגבלת כמות</span>
+          <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] text-slate-500 dark:text-slate-400 mt-3 max-w-2xl mx-auto">
+            <span className="font-medium text-slate-700 dark:text-slate-300">פורמטים נתמכים:</span>
+            <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300">Excel (.xlsx, .xls, .ods)</span>
+            <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300">CSV / TSV / TXT</span>
+            <span className="bg-blue-50 dark:bg-blue-950/60 text-blue-700 dark:text-blue-300 border border-blue-200 dark:border-blue-800 px-1.5 py-0.5 rounded font-semibold">HTML / HTM (דפי פירוט תנועות)</span>
+            <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300">PDF (כולל סרוק)</span>
+            <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300">JSON / XML / OFX</span>
+            <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300">תמונות (JPG, PNG)</span>
+            <span className="bg-slate-100 dark:bg-slate-800 px-1.5 py-0.5 rounded text-slate-700 dark:text-slate-300">ארכיוני ZIP</span>
+            <span>• ללא מגבלת כמות</span>
           </div>
         </div>
 
