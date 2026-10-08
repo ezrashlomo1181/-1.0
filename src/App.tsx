@@ -292,12 +292,23 @@ export default function App() {
       return;
     }
 
-    const fileExt = file.name.toLowerCase().endsWith('.pdf')
+    const lowerName = file.name.toLowerCase();
+    const fileExt = lowerName.endsWith('.pdf')
       ? 'pdf'
-      : file.name.toLowerCase().endsWith('.csv')
+      : lowerName.endsWith('.csv') || lowerName.endsWith('.tsv') || lowerName.endsWith('.txt')
       ? 'csv'
-      : file.name.toLowerCase().endsWith('.xls')
+      : lowerName.endsWith('.xls')
       ? 'xls'
+      : lowerName.endsWith('.html') || lowerName.endsWith('.htm')
+      ? 'html'
+      : lowerName.endsWith('.json')
+      ? 'json'
+      : lowerName.endsWith('.ofx') || lowerName.endsWith('.qfx') || lowerName.endsWith('.xml')
+      ? 'ofx'
+      : lowerName.endsWith('.zip')
+      ? 'zip'
+      : lowerName.match(/\.(jpg|jpeg|png|webp)$/i)
+      ? 'image'
       : 'xlsx';
 
     const institution = detectedInstitution || (

@@ -189,6 +189,7 @@ export function clearUserSpecificState(userId: string): void {
 const LEARNED_RULES_KEY = 'matzpen_learned_rules_v1';
 
 export function getStoredLearnedRules(): LearnedRule[] {
+  if (typeof localStorage === 'undefined') return [];
   try {
     const raw = localStorage.getItem(LEARNED_RULES_KEY);
     if (raw) {
@@ -202,6 +203,7 @@ export function getStoredLearnedRules(): LearnedRule[] {
 }
 
 export function saveStoredLearnedRules(rules: LearnedRule[]): void {
+  if (typeof localStorage === 'undefined') return;
   try {
     localStorage.setItem(LEARNED_RULES_KEY, JSON.stringify(rules));
   } catch (e) {

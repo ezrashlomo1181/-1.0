@@ -161,7 +161,7 @@ export interface FinancialCycleSuggestion {
 export interface UploadedDocument {
   id: string;
   fileName: string;
-  fileType: 'pdf' | 'csv' | 'xlsx' | 'xls';
+  fileType: 'pdf' | 'csv' | 'xlsx' | 'xls' | 'html' | 'json' | 'ofx' | 'zip' | 'image' | string;
   fileSize: number;
   uploadDate: string;
   status: 'completed' | 'processing' | 'error';
@@ -191,7 +191,7 @@ export interface ManagedFileItem {
   id: string;
   fileName: string;
   fileSize: number;
-  fileType: 'pdf' | 'csv' | 'xlsx' | 'xls' | 'unknown';
+  fileType: 'pdf' | 'csv' | 'xlsx' | 'xls' | 'html' | 'json' | 'ofx' | 'zip' | 'image' | 'unknown' | string;
   folderPath?: string;
   fileHash: string;
   uploadStatus: 'waiting' | 'uploading' | 'uploaded' | 'failed';

@@ -51,7 +51,28 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const folderInputRef = useRef<HTMLInputElement>(null);
 
-  const allowedExtensions = ['.pdf', '.csv', '.xlsx', '.xls'];
+  const allowedExtensions = [
+    '.pdf',
+    '.csv',
+    '.xlsx',
+    '.xls',
+    '.xlsm',
+    '.xlsb',
+    '.ods',
+    '.tsv',
+    '.txt',
+    '.html',
+    '.htm',
+    '.json',
+    '.xml',
+    '.ofx',
+    '.qfx',
+    '.zip',
+    '.jpg',
+    '.jpeg',
+    '.png',
+    '.webp',
+  ];
 
   const guides: Record<
     string,
@@ -146,9 +167,14 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
   const getFileType = (name: string): ManagedFileItem['fileType'] => {
     const n = name.toLowerCase();
     if (n.endsWith('.pdf')) return 'pdf';
-    if (n.endsWith('.csv')) return 'csv';
-    if (n.endsWith('.xlsx')) return 'xlsx';
+    if (n.endsWith('.csv') || n.endsWith('.tsv') || n.endsWith('.txt')) return 'csv';
+    if (n.endsWith('.xlsx') || n.endsWith('.xlsm') || n.endsWith('.xlsb') || n.endsWith('.ods')) return 'xlsx';
     if (n.endsWith('.xls')) return 'xls';
+    if (n.endsWith('.html') || n.endsWith('.htm')) return 'html';
+    if (n.endsWith('.json')) return 'json';
+    if (n.endsWith('.ofx') || n.endsWith('.qfx') || n.endsWith('.xml')) return 'ofx';
+    if (n.endsWith('.zip')) return 'zip';
+    if (n.match(/\.(jpg|jpeg|png|webp)$/i)) return 'image';
     return 'unknown';
   };
 
@@ -197,7 +223,7 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
     }
 
     if (newQueueItems.length === 0 && filesList.length > 0) {
-      setErrorMessage('לא נמצאו קבצים בפורמט נתמך (PDF, CSV, Excel).');
+      setErrorMessage('לא נמצאו קבצים בפורמט נתמך (Excel, CSV, PDF, HTML, JSON, OFX, תמונות, ZIP).');
       return;
     }
 
@@ -501,7 +527,7 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
           ref={fileInputRef}
           type="file"
           multiple
-          accept=".pdf,.csv,.xlsx,.xls"
+          accept=".pdf,.csv,.xlsx,.xls,.xlsm,.xlsb,.ods,.tsv,.txt,.html,.htm,.json,.xml,.ofx,.qfx,.zip,.jpg,.jpeg,.png,.webp"
           onChange={handleFilesSelect}
           className="hidden"
         />
@@ -557,7 +583,7 @@ export const DataCenterView: React.FC<DataCenterViewProps> = ({
           </div>
 
           <div className="flex items-center justify-center gap-3 text-[11px] text-slate-500 dark:text-slate-400 mt-3">
-            <span>פורמטים נתמכים: PDF, Excel (.xlsx, .xls), CSV</span>
+            <span>פורמטים נתמכים: Excel (.xlsx, .xls, .ods), CSV/TSV, PDF (כולל סרוק), HTML, JSON, OFX, תמונות (JPG, PNG) ו-ZIP</span>
             <span>•</span>
             <span>ללא מגבלת כמות</span>
           </div>

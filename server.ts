@@ -128,22 +128,34 @@ app.post('/api/ai/parse-document', async (req, res) => {
 
     let extractedText = rawText || '';
 
-    // If PDF base64 is provided, extract text using pdf-parse
+    let isVisualDocument = false;
+    let visualMimeType = 'application/pdf';
+
+    // 1. If PDF base64 is provided, attempt text extraction using pdf-parse
     if (fileBase64 && (fileType === 'pdf' || fileName.toLowerCase().endsWith('.pdf'))) {
       try {
         const pdfBuffer = Buffer.from(fileBase64, 'base64');
         const pdfData = await pdfParse(pdfBuffer);
         extractedText = pdfData.text || '';
       } catch (pdfErr) {
-        console.error('PDF text extraction error:', pdfErr);
-        return res.status(422).json({
-          success: false,
-          error: `שגיאה בחילוץ תוכן מקובץ ה-PDF: ${pdfErr instanceof Error ? pdfErr.message : String(pdfErr)}`,
-        });
+        console.warn('pdf-parse failed, will attempt multimodal visual inspection:', pdfErr);
+        isVisualDocument = true;
+        visualMimeType = 'application/pdf';
       }
+
+      // If text from pdf-parse is suspiciously short or empty (scanned PDF)
+      if (!extractedText || extractedText.trim().length < 40) {
+        isVisualDocument = true;
+        visualMimeType = 'application/pdf';
+      }
+    } else if (fileBase64 && (fileType === 'image' || fileName.toLowerCase().match(/\.(jpg|jpeg|png|webp)$/i))) {
+      isVisualDocument = true;
+      if (fileName.toLowerCase().endsWith('.png')) visualMimeType = 'image/png';
+      else if (fileName.toLowerCase().endsWith('.webp')) visualMimeType = 'image/webp';
+      else visualMimeType = 'image/jpeg';
     }
 
-    if (!extractedText || extractedText.trim().length === 0) {
+    if (!isVisualDocument && (!extractedText || extractedText.trim().length === 0)) {
       return res.status(422).json({
         success: false,
         extractedTransactions: [],
@@ -151,8 +163,8 @@ app.post('/api/ai/parse-document', async (req, res) => {
       });
     }
 
-    // Detect Institution from text
-    const textLower = extractedText.toLowerCase();
+    // Detect Institution from text or filename
+    const textLower = `${extractedText} ${fileName}`.toLowerCase();
     let detectedInstitution = 'מסמך פיננסי';
     if (textLower.includes('הפועלים') || textLower.includes('hapoalim')) detectedInstitution = 'בנק הפועלים';
     else if (textLower.includes('לאומי') || textLower.includes('leumi')) detectedInstitution = 'בנק לאומי';
@@ -165,24 +177,23 @@ app.post('/api/ai/parse-document', async (req, res) => {
     else if (textLower.includes('יהב')) detectedInstitution = 'בנק יהב';
     else if (textLower.includes('בינלאומי')) detectedInstitution = 'הבנק הבינלאומי';
 
-    // 1. If Gemini AI is available, use it for precise extraction
-    if (ai) {
-      try {
-        const prompt = `
+    const extractionPrompt = `
 אתה מפענח מסמכים ותדפיסים בנקאיים וכרטיסי אשראי ישראליים מקצועי.
-תפקידך לחלץ אך ורק את העסקאות הפיננסיות האמיתיות הקיימות בטקסט המסמך שלהלן.
+תפקידך לחלץ אך ורק את העסקאות הפיננסיות האמיתיות הקיימות במסמך.
 
 כללים קריטיים:
-1. אסור לחלוטין להמציא עסקאות דמה, עסקאות לדוגמה או נתונים שלא קיימים בטקסט.
-2. אם אין עסקאות בטקסט, החזר מערך ריק: "extractedTransactions": [].
+1. אסור לחלוטין להמציא עסקאות דמה, עסקאות לדוגמה או נתונים שלא קיימים במסמך.
+2. אם אין עסקאות במסמך, החזר מערך ריק: "extractedTransactions": [].
 3. חלץ תאריך עסקה מדויק בפורמט YYYY-MM-DD. נרמל תאריכים ישראליים כגון 15/04/2024 או 15/04/24. אם מופיע גם תאריך חיוב/ערך בנפרד, חלץ אותו בשדה "billingDate" (YYYY-MM-DD).
 4. סכום חייב להיות מספר חיובי (למשל 120.50).
-5. זיהוי מלא של הכנסות וזיכויים מול הוצאות:
-   - כל שורת זכות, הפקדה, משכורת, תקבול, קצבה, העברה נכנסת או זיכוי כספי חייבת לקבל סוג "income" (או "refund" אם מדובר בזיכוי כרטיס אשראי/החזר מבית עסק).
-   - שורות חובה/תשלומים יסווגו כ-"expense".
-   - העברות בין חשבונות כ-"transfer".
-   - הפקדות/משיכות מקופות גמל, קרנות וניירות ערך כ-"investment_contribution" או "investment_withdrawal".
-   - אין להניח שכל שורה היא הוצאה! חובה לחלץ את כל שורות הזכות וההכנסות שמופיעות במסמך.
+5. סיווג מדויק ושמרני של סוגי העסקאות (type):
+   - משיכת מזומן / כספומט / בנקומט מסווגת כ-expense (הוצאה / משיכת מזומן), ולא כ-transfer!
+   - פירעון כרטיס אשראי / חיוב חודשי כרטיס אשראי בחשבון העו"ש (כגון "חיוב כרטיס", "חיוב ויזה", "חיוב ישראכרט") יסווג כ-transfer עם isInternalTransfer: true, כדי למנוע ספירה כפולה אם נטענו עסקאות הכרטיס.
+   - העברות בין חשבונות המשתמש / העברה עצמית יסווגו כ-transfer עם isInternalTransfer: true.
+   - זיכויים, החזרים כספיים וביטולי עסקאות יסווגו כ-refund (החזר המקטין הוצאה, ולא כהכנסה!).
+   - הכנסות אמיתיות: משכורת, שכר, הפקדת צ'ק/מזומן, קצבה, ביטוח לאומי, דיבידנד, ריבית זכות יסווגו כ-income.
+   - הוצאות רגילות, קניות, תשלומים יסווגו כ-expense.
+   - אם אין מספיק מידע כדי להכריע בוודאות, סמן needsReview: true וציין reviewReason.
 6. סווג לקטגוריה מתאימה בעברית (למשל: "משכורת והכנסות", "מזון וסופר", "מסעדות ובילויים", "תחבורה ורכב", "דיור וחשבונות", "תקשורת וטכנולוגיה", "בריאות ופארם", "קניות וביגוד", "ביטוח ופיננסים", "השקעות וחיסכון", "העברות ומזומן", "כללי").
 
 החזר JSON במבנה הבא בלבד:
@@ -199,18 +210,40 @@ app.post('/api/ai/parse-document', async (req, res) => {
       "category": "שם קטגוריה",
       "currency": "ILS",
       "isRecurring": false,
+      "isInternalTransfer": false,
+      "needsReview": false,
       "confidenceScore": 0.95
     }
   ]
 }
-
-טקסט המסמך:
-${extractedText.slice(0, 30000)}
 `;
+
+    // 1. If Gemini AI is available, use it for precise extraction
+    if (ai) {
+      try {
+        let contents: any;
+
+        if (isVisualDocument && fileBase64) {
+          // Multimodal visual extraction for Scanned PDFs or Images
+          contents = [
+            {
+              inlineData: {
+                mimeType: visualMimeType,
+                data: fileBase64,
+              },
+            },
+            {
+              text: `${extractionPrompt}\nזהו מסמך סרוק / תמונה חזותית. אנא בצע OCR מדויק על פי הטבלאות והעמודות וחלץ את כל העסקאות.`,
+            },
+          ];
+        } else {
+          // Text-based extraction from PDF text layer
+          contents = `${extractionPrompt}\nטקסט המסמך:\n${extractedText.slice(0, 32000)}`;
+        }
 
         const response = await ai.models.generateContent({
           model: 'gemini-3.8-flash',
-          contents: prompt,
+          contents,
           config: {
             responseMimeType: 'application/json',
           },
@@ -235,6 +268,15 @@ ${extractedText.slice(0, 30000)}
       } catch (geminiErr) {
         console.warn('Gemini extraction failed, falling back to local deterministic regex engine:', geminiErr);
       }
+    }
+
+    // If visual document and AI failed or not available, return clear actionable error
+    if (isVisualDocument && (!extractedText || extractedText.trim().length === 0)) {
+      return res.status(422).json({
+        success: false,
+        extractedTransactions: [],
+        error: 'קובץ ה-PDF סרוק או כתמונה ללא שכבת טקסט דיגיטלית. נדרש חיבור AI עבור פענוח OCR חזותי.',
+      });
     }
 
     // 2. Deterministic Local Regex / Table Extraction Fallback
@@ -287,15 +329,26 @@ ${extractedText.slice(0, 30000)}
           line.includes('ביטוח לאומי') ||
           line.includes('מענק');
 
-        const isTransfer = line.includes('העברה עצמית') || line.includes('בין חשבונות');
-        const isRefund = line.includes('זיכוי') && !line.includes('זיכוי שכר');
+        const isAtm = line.includes('כספומט') || line.includes('בנקומט') || line.includes('משיכת מזומן') || line.includes('משיכה במכשיר');
+        const isCreditCardSettlement = line.includes('פירעון כרטיס') || line.includes('חיוב כרטיס') || line.includes('חיוב ויזה') || line.includes('חיוב ישראכרט') || line.includes('חיוב מקס') || line.includes('חיוב מאסטרקארד');
+        const isTransfer = !isAtm && (line.includes('העברה עצמית') || line.includes('בין חשבונות') || line.includes('העברה מחשבון') || line.includes('העברה לחשבון') || isCreditCardSettlement);
+        const isRefund = line.includes('זיכוי') && !line.includes('זיכוי שכר') && !line.includes('שכר');
 
         let txType: string = 'expense';
         let txCat = 'כללי';
+        let isInternalTransfer = false;
 
-        if (isTransfer) {
+        if (isCreditCardSettlement) {
+          txType = 'transfer';
+          txCat = 'פירעון כרטיס אשראי';
+          isInternalTransfer = true;
+        } else if (isAtm) {
+          txType = 'expense';
+          txCat = 'משיכת מזומן';
+        } else if (isTransfer) {
           txType = 'transfer';
           txCat = 'העברות ומזומן';
+          isInternalTransfer = true;
         } else if (isRefund) {
           txType = 'refund';
           txCat = 'החזרים וזיכויים';
@@ -313,6 +366,7 @@ ${extractedText.slice(0, 30000)}
           category: txCat,
           currency: 'ILS',
           isRecurring: false,
+          isInternalTransfer,
           confidenceScore: 0.85,
         });
       }
