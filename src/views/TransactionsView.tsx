@@ -7,6 +7,9 @@ import {
   HelpCircle,
   RefreshCw,
   Clock,
+  ArrowDown,
+  ArrowUp,
+  FileText,
 } from 'lucide-react';
 
 interface TransactionsViewProps {
@@ -27,30 +30,37 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [selectedCategory, setSelectedCategory] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [onlyNeedsReview, setOnlyNeedsReview] = useState<boolean>(false);
+  const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc'); // Default: newest first
 
   // Extract unique categories
   const categories = Array.from(new Set(transactions.map((t) => t.category).filter(Boolean)));
 
   // Filter transactions
-  const filtered = transactions.filter((tx) => {
-    if (onlyNeedsReview && !tx.needsReview) return false;
-    if (selectedCategory !== 'all' && tx.category !== selectedCategory) return false;
-    if (selectedType !== 'all') {
-      if (selectedType === 'internal' && !tx.isInternalTransfer) return false;
-      if (selectedType === 'income' && tx.type !== 'income') return false;
-      if (selectedType === 'expense' && (tx.type !== 'expense' || tx.isInternalTransfer)) return false;
-      if (selectedType === 'refund' && tx.type !== 'refund') return false;
-    }
-    if (searchQuery.trim()) {
-      const q = searchQuery.toLowerCase();
-      const matchMerchant = tx.merchant.toLowerCase().includes(q);
-      const matchDesc = tx.description.toLowerCase().includes(q);
-      const matchCat = tx.category.toLowerCase().includes(q);
-      const matchAmount = tx.amount.toString().includes(q);
-      return matchMerchant || matchDesc || matchCat || matchAmount;
-    }
-    return true;
-  });
+  const filtered = transactions
+    .filter((tx) => {
+      if (onlyNeedsReview && !tx.needsReview) return false;
+      if (selectedCategory !== 'all' && tx.category !== selectedCategory) return false;
+      if (selectedType !== 'all') {
+        if (selectedType === 'internal' && !tx.isInternalTransfer) return false;
+        if (selectedType === 'income' && tx.type !== 'income') return false;
+        if (selectedType === 'expense' && (tx.type !== 'expense' || tx.isInternalTransfer)) return false;
+        if (selectedType === 'refund' && tx.type !== 'refund') return false;
+      }
+      if (searchQuery.trim()) {
+        const q = searchQuery.toLowerCase();
+        const matchMerchant = tx.merchant.toLowerCase().includes(q);
+        const matchDesc = tx.description.toLowerCase().includes(q);
+        const matchCat = tx.category.toLowerCase().includes(q);
+        const matchAmount = tx.amount.toString().includes(q);
+        return matchMerchant || matchDesc || matchCat || matchAmount;
+      }
+      return true;
+    })
+    // Sort chronologically based on real transaction date: newest on top by default
+    .sort((a, b) => {
+      const cmp = a.date.localeCompare(b.date);
+      return sortDirection === 'desc' ? -cmp : cmp;
+    });
 
   const needsReviewCount = transactions.filter((t) => t.needsReview).length;
 
@@ -151,7 +161,19 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
             <table className="w-full text-right text-xs">
               <thead>
                 <tr className="border-b border-slate-200 dark:border-[#1F2937] bg-slate-50 dark:bg-[#0B0F17] text-slate-600 dark:text-slate-400 font-semibold">
-                  <th className="py-2.5 px-4 font-medium">תאריך</th>
+                  <th
+                    onClick={() => setSortDirection(sortDirection === 'desc' ? 'asc' : 'desc')}
+                    className="py-2.5 px-4 font-medium cursor-pointer hover:text-slate-900 dark:hover:text-white transition-colors"
+                  >
+                    <div className="inline-flex items-center gap-1">
+                      <span>תאריך</span>
+                      {sortDirection === 'desc' ? (
+                        <ArrowDown className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      ) : (
+                        <ArrowUp className="w-3.5 h-3.5 text-blue-600 dark:text-blue-400" />
+                      )}
+                    </div>
+                  </th>
                   <th className="py-2.5 px-4 font-medium">בית עסק ותיאור</th>
                   <th className="py-2.5 px-4 font-medium">חשבון מקור</th>
                   <th className="py-2.5 px-4 font-medium">קטגוריה</th>
@@ -170,8 +192,22 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       }`}
                     >
                       {/* Date */}
-                      <td className="py-3 px-4 font-mono text-slate-500 dark:text-slate-400 whitespace-nowrap">
-                        {tx.date}
+                      <td className="py-3 px-4 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">
+                        <div className="font-semibold text-xs">{tx.date}</div>
+                        {tx.billingDate && tx.billingDate !== tx.date && (
+                          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono" title="תאריך חיוב">
+                            חיוב: {tx.billingDate}
+                          </div>
+                        )}
+                        {tx.additionalSources && tx.additionalSources.length > 0 && (
+                          <div
+                            className="inline-flex items-center gap-1 text-[9px] text-blue-600 dark:text-blue-400 font-sans mt-0.5"
+                            title={`זוהה גם במסמכים: ${tx.additionalSources.join(', ')}`}
+                          >
+                            <FileText className="w-2.5 h-2.5" />
+                            <span>+{tx.additionalSources.length} מקורות</span>
+                          </div>
+                        )}
                       </td>
 
                       {/* Merchant & Description */}

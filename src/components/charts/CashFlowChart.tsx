@@ -10,6 +10,19 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [period, setPeriod] = useState<'6m' | '12m'>('6m');
 
+  if (!data || data.length === 0) {
+    return (
+      <div className="bg-white dark:bg-[#111827] rounded-xl border border-slate-200 dark:border-[#1F2937] p-8 shadow-xs text-center transition-colors">
+        <h3 className="text-sm font-bold text-[#0F172A] dark:text-white mb-1">
+          תזרים חודשי: הכנסות, הוצאות וחיסכון
+        </h3>
+        <p className="text-xs text-slate-500 dark:text-slate-400 max-w-sm mx-auto mt-2">
+          עדיין אין מספיק עסקאות להצגת מגמת תזרים חודשי. לאחר ייבוא תדפיסי בנק או כרטיסי אשראי, התזרים ההיסטורי יחושב ויוצג כאן אוטומטית.
+        </p>
+      </div>
+    );
+  }
+
   // SVG dimensions
   const width = 680;
   const height = 240;

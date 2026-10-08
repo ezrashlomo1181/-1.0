@@ -127,29 +127,221 @@ export function calculateMonthlyCashFlow(transactions: Transaction[], accounts: 
   };
 }
 
-export function getCashFlowHistory(transactions: Transaction[], monthsCount: number = 6): MonthDataPoint[] {
-  // Generate realistic historical monthly trend
-  const monthLabels = ['אפריל', 'מאי', 'יוני', 'יולי', 'אוגוסט', 'ספטמבר'];
-  const baseIncome = 22400;
-  const baseExpenses = [14200, 15100, 13900, 16400, 15800, 14850];
+const HEBREW_MONTH_NAMES = [
+  'ינואר', 'פברואר', 'מרץ', 'אפריל', 'מאי', 'יוני',
+  'יולי', 'אוגוסט', 'ספטמבר', 'אוקטובר', 'נובמבר', 'דצמבר'
+];
+
+export function formatMonthKeyLabel(monthKey: string): string {
+  // monthKey is YYYY-MM
+  const parts = monthKey.split('-');
+  if (parts.length < 2) return monthKey;
+  const year = parts[0];
+  const monthIdx = parseInt(parts[1], 10) - 1;
+  const monthName = HEBREW_MONTH_NAMES[monthIdx] || parts[1];
+  return `${monthName} ${year}`;
+}
+
+export function getCashFlowHistory(transactions: Transaction[], maxMonths: number = 6): MonthDataPoint[] {
+  // CRITICAL: Calculate ONLY from real stored transactions. Zero mocks.
+  const valid = transactions.filter((t) => !t.isInternalTransfer && t.type !== 'transfer');
+  if (valid.length === 0) return [];
+
+  // Group by real transaction month (YYYY-MM from Transaction.date)
+  const monthMap = new Map<string, { income: number; expense: number }>();
+
+  for (const t of valid) {
+    if (!t.date || t.date.length < 7) continue;
+    const monthKey = t.date.substring(0, 7); // e.g. "2026-09"
+    const curr = monthMap.get(monthKey) || { income: 0, expense: 0 };
+
+    if (t.type === 'income') {
+      curr.income += t.amount;
+    } else if (t.type === 'refund') {
+      curr.expense -= Math.abs(t.amount);
+    } else if (t.type === 'expense' || t.type === 'fee' || t.type === 'loan_payment') {
+      curr.expense += Math.abs(t.amount);
+    }
+
+    monthMap.set(monthKey, curr);
+  }
+
+  // Sort chronologically ascending for the chart
+  const sortedMonthKeys = Array.from(monthMap.keys()).sort((a, b) => a.localeCompare(b));
+  // Take up to maxMonths recent months
+  const recentKeys = sortedMonthKeys.slice(-maxMonths);
 
   const points: MonthDataPoint[] = [];
+  for (const key of recentKeys) {
+    const val = monthMap.get(key)!;
+    const expense = Math.max(0, val.expense);
+    const income = Math.max(0, val.income);
+    const savings = Math.max(0, income - expense);
 
-  for (let i = 0; i < monthsCount; i++) {
-    const exp = baseExpenses[i] || 14500;
-    const inc = i === 3 ? baseIncome + 3500 : (i === 5 ? baseIncome + 1200 : baseIncome); // bonuses in July/Sept
-    const sav = Math.max(0, inc - exp);
     points.push({
-      monthKey: `2026-0${i + 4}`,
-      monthLabel: monthLabels[i] || `חודש ${i + 1}`,
-      income: inc,
-      expense: exp,
-      savings: sav,
+      monthKey: key,
+      monthLabel: formatMonthKeyLabel(key),
+      income: Math.round(income),
+      expense: Math.round(expense),
+      savings: Math.round(savings),
     });
   }
 
   return points;
 }
+
+// -------------------------------------------------------------
+// FINANCIAL CYCLE DETECTION & PERIOD MAPPING
+// -------------------------------------------------------------
+import { FinancialCycleSuggestion, FinancialCycleConfig } from '../types/financial';
+
+/**
+ * Detect repeated patterns in salary / credit card settlement dates across multiple months.
+ * Looks for recurring large income or high activity on days 10, 1, 15, etc.
+ */
+export function detectFinancialCyclePattern(transactions: Transaction[]): FinancialCycleSuggestion | null {
+  const valid = transactions.filter((t) => !t.isInternalTransfer && t.type !== 'transfer');
+  if (valid.length < 10) return null;
+
+  // Track occurrences of recurring income / salary or large charges by day-of-month
+  const dayIncomeCounts = new Map<number, { count: number; totalAmount: number; months: Set<string> }>();
+  const dayExpenseSpikes = new Map<number, { count: number; months: Set<string> }>();
+
+  for (const t of valid) {
+    if (!t.date || t.date.length < 10) continue;
+    const parts = t.date.split('-');
+    const day = parseInt(parts[2], 10);
+    const monthKey = `${parts[0]}-${parts[1]}`;
+
+    if (t.type === 'income' && t.amount >= 3000) {
+      // Significant income or salary
+      const entry = dayIncomeCounts.get(day) || { count: 0, totalAmount: 0, months: new Set() };
+      entry.count += 1;
+      entry.totalAmount += t.amount;
+      entry.months.add(monthKey);
+      dayIncomeCounts.set(day, entry);
+    } else if (t.paymentMethod === 'credit_card' || t.type === 'expense') {
+      const entry = dayExpenseSpikes.get(day) || { count: 0, months: new Set() };
+      entry.count += 1;
+      entry.months.add(monthKey);
+      dayExpenseSpikes.set(day, entry);
+    }
+  }
+
+  // Count distinct months in transactions
+  const allMonths = new Set(valid.map((t) => t.date.substring(0, 7)));
+  if (allMonths.size < 2) {
+    // Need at least 2 distinct months of real data to detect a true cycle pattern
+    return null;
+  }
+
+  // Standard Israeli financial cycles: 10th (very common), 1st, 15th, 2nd
+  const candidateDays = [10, 1, 15, 2, 20];
+  let bestDay: number | null = null;
+  let bestScore = 0;
+  let bestReason = '';
+  let bestMonthsCovered = 0;
+
+  for (const day of candidateDays) {
+    // Check window of day ± 1 (e.g. 9-11)
+    let incomeOccurrences = 0;
+    const matchedMonths = new Set<string>();
+
+    for (let d = Math.max(1, day - 1); d <= Math.min(31, day + 1); d++) {
+      const inc = dayIncomeCounts.get(d);
+      if (inc) {
+        incomeOccurrences += inc.count;
+        inc.months.forEach((m) => matchedMonths.add(m));
+      }
+    }
+
+    if (matchedMonths.size >= 2 && incomeOccurrences >= 2) {
+      const score = Math.min(1.0, (matchedMonths.size / allMonths.size) * 0.9 + 0.1);
+      if (score > bestScore) {
+        bestScore = score;
+        bestDay = day;
+        bestMonthsCovered = matchedMonths.size;
+        bestReason = `זוהתה כניסת משכורת/הכנסה קבועה סביב ה-${day} לחודש ב-${matchedMonths.size} חודשים שונים.`;
+      }
+    }
+  }
+
+  // If no income pattern found, check credit card bill spike on day 10 or 15 or 2
+  if (!bestDay) {
+    for (const day of [10, 15, 2]) {
+      const sp = dayExpenseSpikes.get(day);
+      if (sp && sp.months.size >= 2) {
+        bestDay = day;
+        bestScore = 0.75;
+        bestMonthsCovered = sp.months.size;
+        bestReason = `זוהה ריכוז חיובים חוזר סביב ה-${day} לחודש ב-${sp.months.size} חודשים.`;
+        break;
+      }
+    }
+  }
+
+  if (bestDay && bestScore >= 0.7 && bestDay !== 1) {
+    return {
+      suggestedStartDay: bestDay,
+      confidenceScore: bestScore,
+      reasoning: bestReason,
+      occurrencesCount: bestMonthsCovered,
+      monthsAnalyzed: allMonths.size,
+    };
+  }
+
+  return null;
+}
+
+/**
+ * Calculates which Financial Cycle period a transaction date belongs to.
+ * E.g., if startDay = 10:
+ * 2026-09-08 belongs to cycle "2026-08-10_to_2026-09-09" (August-September cycle)
+ * 2026-09-12 belongs to cycle "2026-09-10_to_2026-10-09" (September-October cycle)
+ */
+export function getTransactionCyclePeriod(dateStr: string, startDay: number): {
+  periodKey: string;
+  periodLabel: string;
+} {
+  const parts = dateStr.split('-');
+  const y = parseInt(parts[0], 10);
+  const m = parseInt(parts[1], 10);
+  const d = parseInt(parts[2], 10);
+
+  let cycleStartYear = y;
+  let cycleStartMonth = m;
+
+  if (d < startDay) {
+    // Falls into the cycle that started in the previous calendar month
+    cycleStartMonth = m - 1;
+    if (cycleStartMonth === 0) {
+      cycleStartMonth = 12;
+      cycleStartYear = y - 1;
+    }
+  }
+
+  let cycleEndYear = cycleStartYear;
+  let cycleEndMonth = cycleStartMonth + 1;
+  if (cycleEndMonth === 13) {
+    cycleEndMonth = 1;
+    cycleEndYear = cycleStartYear + 1;
+  }
+
+  const endDay = startDay - 1;
+  const startMonthStr = String(cycleStartMonth).padStart(2, '0');
+  const endMonthStr = String(cycleEndMonth).padStart(2, '0');
+  const startDayStr = String(startDay).padStart(2, '0');
+  const endDayStr = String(endDay).padStart(2, '0');
+
+  const periodKey = `${cycleStartYear}-${startMonthStr}-${startDayStr}_to_${cycleEndYear}-${endMonthStr}-${endDayStr}`;
+  const startMonthName = HEBREW_MONTH_NAMES[cycleStartMonth - 1];
+  const endMonthName = HEBREW_MONTH_NAMES[cycleEndMonth - 1];
+
+  const periodLabel = `${startDay} ב${startMonthName} – ${endDay} ב${endMonthName} ${cycleEndYear}`;
+
+  return { periodKey, periodLabel };
+}
+
 
 export function getCategoryBreakdown(transactions: Transaction[]): CategorySummary[] {
   // Filter out internal transfers and income

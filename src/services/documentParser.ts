@@ -1,5 +1,6 @@
 import * as XLSX from 'xlsx';
-import { Transaction, TransactionType, ConfidenceLevel } from '../types/financial';
+import { Transaction, TransactionType, ConfidenceLevel, LearnedRule } from '../types/financial';
+import { getStoredLearnedRules } from './storage';
 
 export interface ParseResult {
   success: boolean;
@@ -183,11 +184,71 @@ const CATEGORY_MAP: { keywords: string[]; category: string; type?: TransactionTy
   }
 ];
 
-export function categorizeMerchant(merchant: string, description: string): {
+// Helper to check user learned rules with absolute precedence
+export function matchLearnedRule(
+  merchant: string,
+  description: string,
+  customRules?: LearnedRule[]
+): LearnedRule | null {
+  const rules = customRules || getStoredLearnedRules();
+  if (!rules || rules.length === 0) return null;
+
+  const mClean = merchant.trim().toLowerCase();
+  const dClean = description.trim().toLowerCase();
+  const combined = `${mClean} ${dClean}`.trim();
+
+  for (const rule of rules) {
+    if (!rule.pattern) continue;
+    const pat = rule.pattern.trim().toLowerCase();
+
+    if (rule.applyTo === 'exact' || rule.applyTo === 'exact_only') {
+      if (mClean === pat || combined === pat) {
+        return rule;
+      }
+    } else {
+      // similar or all_similar: substring or token overlap
+      if (
+        mClean.includes(pat) ||
+        pat.includes(mClean) ||
+        combined.includes(pat)
+      ) {
+        return rule;
+      }
+
+      // Check primary words (e.g. "Bit" in "Bit - תשלום")
+      const patWords = pat.split(/\s+/).filter((w) => w.length > 1);
+      if (patWords.length > 0 && patWords.every((w) => combined.includes(w))) {
+        return rule;
+      }
+    }
+  }
+
+  return null;
+}
+
+export function categorizeMerchant(
+  merchant: string,
+  description: string,
+  customRules?: LearnedRule[]
+): {
   category: string;
   type: TransactionType;
   confidenceScore: number;
+  matchedRuleId?: string;
+  isUserRule?: boolean;
 } {
+  // 1. HIGHEST PRIORITY: Check user learned rules
+  const userRule = matchLearnedRule(merchant, description, customRules);
+  if (userRule) {
+    return {
+      category: userRule.assignedCategory,
+      type: userRule.assignedType || 'expense',
+      confidenceScore: 1.0,
+      matchedRuleId: userRule.id,
+      isUserRule: true,
+    };
+  }
+
   const combined = `${merchant} ${description}`.toLowerCase();
 
   for (const rule of CATEGORY_MAP) {
@@ -379,6 +440,7 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
       // Find Header Row
       let headerRowIndex = -1;
       let dateCol = -1;
+      let billingDateCol = -1;
       let descCol = -1;
       let amountCol = -1;
       let debitCol = -1;
@@ -390,6 +452,7 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         const row = rawRows[r].map((cell) => String(cell || '').trim());
         
         let foundDate = -1;
+        let foundBillingDate = -1;
         let foundDesc = -1;
         let foundAmount = -1;
         let foundDebit = -1;
@@ -398,10 +461,18 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         row.forEach((colText, idx) => {
           const t = colText.toLowerCase();
           if (
+            t.includes('תאריך חיוב') ||
+            t.includes('ת.חיוב') ||
+            t.includes('תאריך ערך') ||
+            t.includes('ת.ערך') ||
+            t.includes('billing date') ||
+            t.includes('value date')
+          ) {
+            foundBillingDate = idx;
+          } else if (
             t.includes('תאריך') ||
             t.includes('ת.עסקה') ||
             t.includes('תאריך עסקה') ||
-            t.includes('תאריך ערך') ||
             t === 'date'
           ) {
             foundDate = idx;
@@ -428,6 +499,7 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
             t.includes('סכום זיכוי') ||
             t.includes('זיכוי') ||
             t.includes('הפקדה') ||
+            t.includes('הכנסה') ||
             t === 'credit'
           ) {
             foundCredit = idx;
@@ -445,9 +517,10 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         });
 
         // A valid header row must have at least Date + (Desc or Amount)
-        if (foundDate !== -1 && (foundDesc !== -1 || foundAmount !== -1 || foundDebit !== -1)) {
+        if ((foundDate !== -1 || foundBillingDate !== -1) && (foundDesc !== -1 || foundAmount !== -1 || foundDebit !== -1 || foundCredit !== -1)) {
           headerRowIndex = r;
-          dateCol = foundDate;
+          dateCol = foundDate !== -1 ? foundDate : foundBillingDate;
+          billingDateCol = foundBillingDate !== -1 ? foundBillingDate : -1;
           descCol = foundDesc;
           amountCol = foundAmount;
           debitCol = foundDebit;
@@ -471,6 +544,9 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         const normalizedDate = normalizeDate(rawDate);
         if (!normalizedDate) continue; // Skip non-data rows or summary rows
 
+        const rawBillingDate = billingDateCol !== -1 ? row[billingDateCol] : null;
+        const normalizedBillingDate = rawBillingDate ? normalizeDate(rawBillingDate) : undefined;
+
         const rawDesc = descCol !== -1 ? String(row[descCol] || '').trim() : '';
         const rawCategory = categoryCol !== -1 ? String(row[categoryCol] || '').trim() : '';
         const rawRef = refCol !== -1 ? String(row[refCol] || '').trim() : '';
@@ -478,6 +554,7 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         let txAmount = 0;
         let txType: TransactionType = 'expense';
         let foundValidAmount = false;
+        let isDefiniteCredit = false;
 
         // Check Debit vs Credit columns first
         if (debitCol !== -1 || creditCol !== -1) {
@@ -487,6 +564,7 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
           if (creditVal && creditVal.amount > 0) {
             txAmount = creditVal.amount;
             txType = 'income';
+            isDefiniteCredit = true;
             foundValidAmount = true;
           } else if (debitVal && debitVal.amount > 0) {
             txAmount = debitVal.amount;
@@ -503,9 +581,19 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
             // Negative amount in bank statement -> expense; positive -> income
             // In credit card statements, amount is usually positive charges -> check institution
             if (institutionInfo.defaultPayment === 'credit_card') {
-              txType = parsedAmount.isNegative ? 'income' : 'expense';
+              if (parsedAmount.isNegative) {
+                txType = 'refund';
+                isDefiniteCredit = true;
+              } else {
+                txType = 'expense';
+              }
             } else {
-              txType = parsedAmount.isNegative ? 'expense' : 'income';
+              if (parsedAmount.isNegative) {
+                txType = 'expense';
+              } else {
+                txType = 'income';
+                isDefiniteCredit = true;
+              }
             }
             foundValidAmount = true;
           }
@@ -516,21 +604,39 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
         const merchantName = rawDesc || rawCategory || 'עסקה ללא פירוט';
         const classification = categorizeMerchant(merchantName, rawCategory);
 
-        // If detected as income keywords (משכורת, העברה מ-), set income
-        if (classification.type === 'income') {
-          txType = 'income';
-        } else if (classification.type === 'investment_contribution') {
-          txType = 'investment_contribution';
-        } else if (classification.type === 'transfer') {
-          txType = 'transfer';
+        // Classification overrides: if row is definite credit, never turn into expense
+        if (isDefiniteCredit) {
+          if (classification.category === 'משכורת והכנסות' || classification.type === 'income') {
+            txType = 'income';
+          } else if (classification.type === 'investment_contribution' || classification.type === 'transfer') {
+            txType = classification.type;
+          } else if (institutionInfo.defaultPayment === 'credit_card') {
+            txType = 'refund';
+          } else {
+            txType = 'income';
+          }
+        } else {
+          // Normal debit row - but keyword could still signify refund/income if explicit
+          if (classification.type === 'income') {
+            txType = 'income';
+          } else if (classification.type === 'investment_contribution') {
+            txType = 'investment_contribution';
+          } else if (classification.type === 'transfer') {
+            txType = 'transfer';
+          }
         }
 
-        const category = rawCategory || classification.category;
+        let category = rawCategory || classification.category;
+        if (isDefiniteCredit && category === 'אחר / ללא סיווג') {
+          category = txType === 'refund' ? 'זיכויים והחזרים' : 'משכורת והכנסות';
+        }
+
         const confidenceLevel: ConfidenceLevel = classification.confidenceScore > 0.8 ? 'high' : 'medium';
 
         const tx: Transaction = {
           id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
           date: normalizedDate,
+          billingDate: normalizedBillingDate || undefined,
           amount: Math.round(txAmount * 100) / 100,
           currency: 'ILS',
           merchant: merchantName,
@@ -543,8 +649,8 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
           isRecurring: false,
           confidenceScore: classification.confidenceScore,
           confidenceLevel,
-          needsReview: confidenceLevel === 'medium',
-          userConfirmed: confidenceLevel === 'high',
+          needsReview: confidenceLevel === 'medium' && !classification.isUserRule,
+          userConfirmed: confidenceLevel === 'high' || Boolean(classification.isUserRule),
           sourceDocument: file.name,
         };
 
@@ -561,8 +667,8 @@ export async function parseExcelFile(file: File): Promise<ParseResult> {
       };
     }
 
-    // Sort by date ascending
-    allTransactions.sort((a, b) => a.date.localeCompare(b.date));
+    // Sort by date descending (newest on top)
+    allTransactions.sort((a, b) => b.date.localeCompare(a.date));
 
     return {
       success: true,
@@ -666,6 +772,7 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
   // Find Header Line
   let headerIndex = -1;
   let dateCol = -1;
+  let billingDateCol = -1;
   let descCol = -1;
   let amountCol = -1;
   let debitCol = -1;
@@ -676,6 +783,7 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
   for (let i = 0; i < Math.min(lines.length, 25); i++) {
     const cols = parseLine(lines[i]);
     let fDate = -1;
+    let fBillingDate = -1;
     let fDesc = -1;
     let fAmount = -1;
     let fDebit = -1;
@@ -683,18 +791,36 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
 
     cols.forEach((col, idx) => {
       const c = col.toLowerCase();
-      if (c.includes('תאריך') || c.includes('date') || c.includes('ת.עסקה')) fDate = idx;
-      else if (c.includes('תיאור') || c.includes('פרטים') || c.includes('בית עסק') || c.includes('פעולה') || c.includes('merchant') || c.includes('description')) fDesc = idx;
-      else if (c.includes('חובה') || c.includes('חיוב') || c === 'debit') fDebit = idx;
-      else if (c.includes('זכות') || c.includes('זיכוי') || c === 'credit') fCredit = idx;
-      else if (c.includes('סכום') || c === 'amount') fAmount = idx;
-      else if (c.includes('קטגוריה') || c.includes('ענף')) categoryCol = idx;
-      else if (c.includes('אסמכתא') || c.includes('שובר')) refCol = idx;
+      if (
+        c.includes('תאריך חיוב') ||
+        c.includes('ת.חיוב') ||
+        c.includes('תאריך ערך') ||
+        c.includes('ת.ערך') ||
+        c.includes('billing date') ||
+        c.includes('value date')
+      ) {
+        fBillingDate = idx;
+      } else if (c.includes('תאריך') || c.includes('date') || c.includes('ת.עסקה')) {
+        fDate = idx;
+      } else if (c.includes('תיאור') || c.includes('פרטים') || c.includes('בית עסק') || c.includes('פעולה') || c.includes('merchant') || c.includes('description')) {
+        fDesc = idx;
+      } else if (c.includes('חובה') || c.includes('חיוב') || c === 'debit') {
+        fDebit = idx;
+      } else if (c.includes('זכות') || c.includes('זיכוי') || c.includes('הפקדה') || c.includes('הכנסה') || c === 'credit') {
+        fCredit = idx;
+      } else if (c.includes('סכום') || c === 'amount') {
+        fAmount = idx;
+      } else if (c.includes('קטגוריה') || c.includes('ענף')) {
+        categoryCol = idx;
+      } else if (c.includes('אסמכתא') || c.includes('שובר')) {
+        refCol = idx;
+      }
     });
 
-    if (fDate !== -1 && (fDesc !== -1 || fAmount !== -1 || fDebit !== -1)) {
+    if ((fDate !== -1 || fBillingDate !== -1) && (fDesc !== -1 || fAmount !== -1 || fDebit !== -1 || fCredit !== -1)) {
       headerIndex = i;
-      dateCol = fDate;
+      dateCol = fDate !== -1 ? fDate : fBillingDate;
+      billingDateCol = fBillingDate !== -1 ? fBillingDate : -1;
       descCol = fDesc;
       amountCol = fAmount;
       debitCol = fDebit;
@@ -722,6 +848,9 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
     const normalizedDate = normalizeDate(rawDate);
     if (!normalizedDate) continue;
 
+    const rawBillingDate = billingDateCol !== -1 ? cols[billingDateCol] : null;
+    const normalizedBillingDate = rawBillingDate ? normalizeDate(rawBillingDate) : undefined;
+
     const rawDesc = descCol !== -1 ? cols[descCol] : '';
     const rawCategory = categoryCol !== -1 ? cols[categoryCol] : '';
     const rawRef = refCol !== -1 ? cols[refCol] : '';
@@ -729,6 +858,7 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
     let txAmount = 0;
     let txType: TransactionType = 'expense';
     let foundAmount = false;
+    let isDefiniteCredit = false;
 
     if (debitCol !== -1 || creditCol !== -1) {
       const debitVal = debitCol !== -1 ? parseIsraeliAmount(cols[debitCol]) : null;
@@ -737,6 +867,7 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
       if (creditVal && creditVal.amount > 0) {
         txAmount = creditVal.amount;
         txType = 'income';
+        isDefiniteCredit = true;
         foundAmount = true;
       } else if (debitVal && debitVal.amount > 0) {
         txAmount = debitVal.amount;
@@ -750,9 +881,19 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
       if (parsedAmount && parsedAmount.amount > 0) {
         txAmount = parsedAmount.amount;
         if (institutionInfo.defaultPayment === 'credit_card') {
-          txType = parsedAmount.isNegative ? 'income' : 'expense';
+          if (parsedAmount.isNegative) {
+            txType = 'refund';
+            isDefiniteCredit = true;
+          } else {
+            txType = 'expense';
+          }
         } else {
-          txType = parsedAmount.isNegative ? 'expense' : 'income';
+          if (parsedAmount.isNegative) {
+            txType = 'expense';
+          } else {
+            txType = 'income';
+            isDefiniteCredit = true;
+          }
         }
         foundAmount = true;
       }
@@ -763,16 +904,33 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
     const merchantName = rawDesc || rawCategory || 'עסקה ללא פירוט';
     const classification = categorizeMerchant(merchantName, rawCategory);
 
-    if (classification.type === 'income') txType = 'income';
-    else if (classification.type === 'investment_contribution') txType = 'investment_contribution';
-    else if (classification.type === 'transfer') txType = 'transfer';
+    if (isDefiniteCredit) {
+      if (classification.category === 'משכורת והכנסות' || classification.type === 'income') {
+        txType = 'income';
+      } else if (classification.type === 'investment_contribution' || classification.type === 'transfer') {
+        txType = classification.type;
+      } else if (institutionInfo.defaultPayment === 'credit_card') {
+        txType = 'refund';
+      } else {
+        txType = 'income';
+      }
+    } else {
+      if (classification.type === 'income') txType = 'income';
+      else if (classification.type === 'investment_contribution') txType = 'investment_contribution';
+      else if (classification.type === 'transfer') txType = 'transfer';
+    }
 
-    const category = rawCategory || classification.category;
+    let category = rawCategory || classification.category;
+    if (isDefiniteCredit && category === 'אחר / ללא סיווג') {
+      category = txType === 'refund' ? 'זיכויים והחזרים' : 'משכורת והכנסות';
+    }
+
     const confidenceLevel: ConfidenceLevel = classification.confidenceScore > 0.8 ? 'high' : 'medium';
 
     transactions.push({
       id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
       date: normalizedDate,
+      billingDate: normalizedBillingDate || undefined,
       amount: Math.round(txAmount * 100) / 100,
       currency: 'ILS',
       merchant: merchantName,
@@ -785,8 +943,8 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
       isRecurring: false,
       confidenceScore: classification.confidenceScore,
       confidenceLevel,
-      needsReview: confidenceLevel === 'medium',
-      userConfirmed: confidenceLevel === 'high',
+      needsReview: confidenceLevel === 'medium' && !classification.isUserRule,
+      userConfirmed: confidenceLevel === 'high' || Boolean(classification.isUserRule),
       sourceDocument: fileName,
     });
   }
@@ -800,7 +958,8 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
     };
   }
 
-  transactions.sort((a, b) => a.date.localeCompare(b.date));
+  // Sort descending by date (newest first)
+  transactions.sort((a, b) => b.date.localeCompare(a.date));
 
   return {
     success: true,
@@ -858,6 +1017,7 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
 
     const transactions: Transaction[] = data.extractedTransactions.map((item: any) => {
       const normalizedDate = normalizeDate(item.date) || new Date().toISOString().split('T')[0];
+      const normalizedBillingDate = item.billingDate ? normalizeDate(item.billingDate) : undefined;
       const parsedAmount = parseIsraeliAmount(item.amount) || { amount: Math.abs(Number(item.amount) || 0), isNegative: false };
       const merchant = String(item.merchant || item.description || 'עסקה ללא שם').trim();
       const rawCategory = String(item.category || '').trim();
@@ -865,10 +1025,17 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
 
       let txType: TransactionType = item.type || classification.type || 'expense';
       if (item.type === 'income' || item.isCredit) txType = 'income';
+      else if (item.type === 'refund') txType = 'refund';
+
+      let category = rawCategory || classification.category;
+      if (txType === 'income' && category === 'אחר / ללא סיווג') {
+        category = 'משכורת והכנסות';
+      }
 
       return {
         id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
         date: normalizedDate,
+        billingDate: normalizedBillingDate || undefined,
         amount: Math.round(parsedAmount.amount * 100) / 100,
         currency: (item.currency === 'USD' || item.currency === 'EUR') ? item.currency : 'ILS',
         merchant,
@@ -876,19 +1043,20 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
         accountId: instInfo.accountId,
         accountName: instInfo.accountName,
         paymentMethod: instInfo.defaultPayment,
-        category: rawCategory || classification.category,
+        category,
         type: txType,
         isRecurring: Boolean(item.isRecurring),
-        confidenceScore: item.confidenceScore || classification.confidenceScore,
-        confidenceLevel: (item.confidenceScore || 0.9) > 0.8 ? 'high' : 'medium',
-        needsReview: Boolean(item.needsReview),
+        confidenceScore: classification.isUserRule ? 1.0 : (item.confidenceScore || classification.confidenceScore),
+        confidenceLevel: classification.isUserRule ? 'high' : ((item.confidenceScore || 0.9) > 0.8 ? 'high' : 'medium'),
+        needsReview: classification.isUserRule ? false : Boolean(item.needsReview),
         reviewReason: item.reviewReason,
-        userConfirmed: !item.needsReview,
+        userConfirmed: Boolean(classification.isUserRule) || !item.needsReview,
         sourceDocument: file.name,
       };
     });
 
-    transactions.sort((a, b) => a.date.localeCompare(b.date));
+    // Sort descending by date (newest first)
+    transactions.sort((a, b) => b.date.localeCompare(a.date));
 
     return {
       success: true,
@@ -939,13 +1107,13 @@ export async function parseFinancialDocument(file: File): Promise<ParseResult> {
 export function deduplicateTransactions(
   existingTxs: Transaction[],
   newTxs: Transaction[]
-): { uniqueTxs: Transaction[]; duplicatesCount: number } {
-  // Key composed of date + normalized amount + normalized merchant
-  const existingKeys = new Set<string>();
+): { uniqueTxs: Transaction[]; duplicatesCount: number; updatedExistingTxs?: Transaction[] } {
+  // Map keyed by date + normalized amount + normalized merchant + type
+  const existingMap = new Map<string, Transaction>();
 
   for (const t of existingTxs) {
     const key = `${t.date}_${t.amount.toFixed(2)}_${t.merchant.trim().toLowerCase()}_${t.type}`;
-    existingKeys.add(key);
+    existingMap.set(key, t);
   }
 
   const uniqueTxs: Transaction[] = [];
@@ -953,13 +1121,27 @@ export function deduplicateTransactions(
 
   for (const t of newTxs) {
     const key = `${t.date}_${t.amount.toFixed(2)}_${t.merchant.trim().toLowerCase()}_${t.type}`;
-    if (existingKeys.has(key)) {
+    if (existingMap.has(key)) {
       duplicatesCount++;
+      const existing = existingMap.get(key)!;
+      // Record additional source document if different
+      if (t.sourceDocument && t.sourceDocument !== existing.sourceDocument) {
+        if (!existing.additionalSources) {
+          existing.additionalSources = [];
+        }
+        if (!existing.additionalSources.includes(t.sourceDocument)) {
+          existing.additionalSources.push(t.sourceDocument);
+        }
+      }
+      // If new transaction contains billingDate and existing doesn't, enrich it
+      if (t.billingDate && !existing.billingDate) {
+        existing.billingDate = t.billingDate;
+      }
     } else {
-      existingKeys.add(key);
+      existingMap.set(key, t);
       uniqueTxs.push(t);
     }
   }
 
-  return { uniqueTxs, duplicatesCount };
+  return { uniqueTxs, duplicatesCount, updatedExistingTxs: existingTxs };
 }

@@ -36,6 +36,9 @@ export interface Transaction {
   userNotes?: string;
   aiReasoning?: string;
   sourceDocument?: string;
+  additionalSources?: string[];
+  billingDate?: string; // YYYY-MM-DD
+  cyclePeriod?: string; // e.g. "2026-09-10_to_2026-10-09"
   rawText?: string;
   isInternalTransfer?: boolean; // if true, exclude from income/expense calculations
 }
@@ -137,6 +140,22 @@ export interface DataQualityReport {
     notes: string;
   }[];
   recommendations: string[];
+}
+
+export interface FinancialCycleConfig {
+  startDay: number; // e.g. 10 (meaning 10th of the month to 9th of next month)
+  label: string; // e.g. "מחזור 10 בחודש עד 9 בחודש הבא"
+  basis: string; // e.g. "זוהה על בסיס מועד שכר וחיוב כרטיסי אשראי"
+  isApprovedByUser: boolean;
+  detectedAt: string;
+}
+
+export interface FinancialCycleSuggestion {
+  suggestedStartDay: number;
+  confidenceScore: number; // 0 to 1
+  reasoning: string;
+  occurrencesCount: number;
+  monthsAnalyzed: number;
 }
 
 export interface UploadedDocument {

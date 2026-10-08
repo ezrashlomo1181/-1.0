@@ -14,8 +14,10 @@ import {
   AlertTriangle,
   Mail,
   Palette,
+  Edit3,
 } from 'lucide-react';
 import { ThemeToggle } from '../components/ThemeToggle';
+import { EditRuleModal } from '../components/EditRuleModal';
 
 interface SettingsViewProps {
   learnedRules: LearnedRule[];
@@ -41,9 +43,15 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [notifyRestaurantCap, setNotifyRestaurantCap] = useState(true);
   const [notifyLowBalance, setNotifyLowBalance] = useState(false);
   const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
+  const [editingRule, setEditingRule] = useState<LearnedRule | null>(null);
 
   const handleDeleteRule = (id: string) => {
     const updated = learnedRules.filter((r) => r.id !== id);
+    onUpdateRules(updated);
+  };
+
+  const handleSaveEditedRule = (updatedRule: LearnedRule) => {
+    const updated = learnedRules.map((r) => (r.id === updatedRule.id ? updatedRule : r));
     onUpdateRules(updated);
   };
 
@@ -188,17 +196,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
                     נוצר על בסיס: "{rule.userPromptBasis}" • הופעל {rule.timesApplied} פעמים
                   </p>
                 </div>
-                <button
-                  onClick={() => handleDeleteRule(rule.id)}
-                  className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1.5 transition-colors cursor-pointer"
-                  title="מחק חוק זה"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
+                <div className="flex items-center gap-1">
+                  <button
+                    onClick={() => setEditingRule(rule)}
+                    className="text-slate-400 hover:text-blue-600 dark:hover:text-blue-400 p-1.5 transition-colors cursor-pointer"
+                    title="ערוך כלל זה"
+                  >
+                    <Edit3 className="w-4 h-4" />
+                  </button>
+                  <button
+                    onClick={() => handleDeleteRule(rule.id)}
+                    className="text-slate-400 hover:text-rose-600 dark:hover:text-rose-400 p-1.5 transition-colors cursor-pointer"
+                    title="מחק חוק זה"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
+                </div>
               </div>
             ))}
           </div>
         )}
+
+        <EditRuleModal
+          rule={editingRule}
+          isOpen={editingRule !== null}
+          onClose={() => setEditingRule(null)}
+          onSave={handleSaveEditedRule}
+        />
       </div>
 
       {/* 4. AUTOMATED NOTIFICATIONS & WATCHERS */}

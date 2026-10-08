@@ -114,11 +114,14 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {(transaction.reviewOptions || [
+                    'לא ידוע / לבירור',
                     'מזון וסופר',
-                    'מסעדות ומשלוחים',
-                    'קניות',
-                    'בילויים ופנאי',
-                    'מתנות',
+                    'מסעדות ובילויים',
+                    'משכורת והכנסות',
+                    'קניות וביגוד',
+                    'תחבורה ורכב',
+                    'דיור וחשבונות',
+                    'העברות ומזומן',
                   ]).map((opt) => (
                     <button
                       key={opt}

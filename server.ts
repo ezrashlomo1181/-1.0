@@ -175,10 +175,15 @@ app.post('/api/ai/parse-document', async (req, res) => {
 כללים קריטיים:
 1. אסור לחלוטין להמציא עסקאות דמה, עסקאות לדוגמה או נתונים שלא קיימים בטקסט.
 2. אם אין עסקאות בטקסט, החזר מערך ריק: "extractedTransactions": [].
-3. חלץ תאריך מדויק בפורמט YYYY-MM-DD. נרמל תאריכים ישראליים כגון 15/04/2024 או 15/04/24.
+3. חלץ תאריך עסקה מדויק בפורמט YYYY-MM-DD. נרמל תאריכים ישראליים כגון 15/04/2024 או 15/04/24. אם מופיע גם תאריך חיוב/ערך בנפרד, חלץ אותו בשדה "billingDate" (YYYY-MM-DD).
 4. סכום חייב להיות מספר חיובי (למשל 120.50).
-5. קבע סוג עסקה מדויק: "expense" (חובה/הוצאה), "income" (זכות/משכורת/זיכוי), "transfer" (העברה), "investment_contribution" (השקעות).
-6. סווג לקטגוריה מתאימה בעברית (למשל: "מזון וסופר", "מסעדות ובילויים", "תחבורה ורכב", "דיור וחשבונות", "תקשורת וטכנולוגיה", "בריאות ופארם", "קניות וביגוד", "ביטוח ופיננסים", "השקעות וחיסכון", "משכורת והכנסות", "העברות", "כללי").
+5. זיהוי מלא של הכנסות וזיכויים מול הוצאות:
+   - כל שורת זכות, הפקדה, משכורת, תקבול, קצבה, העברה נכנסת או זיכוי כספי חייבת לקבל סוג "income" (או "refund" אם מדובר בזיכוי כרטיס אשראי/החזר מבית עסק).
+   - שורות חובה/תשלומים יסווגו כ-"expense".
+   - העברות בין חשבונות כ-"transfer".
+   - הפקדות/משיכות מקופות גמל, קרנות וניירות ערך כ-"investment_contribution" או "investment_withdrawal".
+   - אין להניח שכל שורה היא הוצאה! חובה לחלץ את כל שורות הזכות וההכנסות שמופיעות במסמך.
+6. סווג לקטגוריה מתאימה בעברית (למשל: "משכורת והכנסות", "מזון וסופר", "מסעדות ובילויים", "תחבורה ורכב", "דיור וחשבונות", "תקשורת וטכנולוגיה", "בריאות ופארם", "קניות וביגוד", "ביטוח ופיננסים", "השקעות וחיסכון", "העברות ומזומן", "כללי").
 
 החזר JSON במבנה הבא בלבד:
 {
@@ -186,6 +191,7 @@ app.post('/api/ai/parse-document', async (req, res) => {
   "extractedTransactions": [
     {
       "date": "YYYY-MM-DD",
+      "billingDate": "YYYY-MM-DD",
       "merchant": "שם בית עסק / תיאור הפעולה",
       "description": "פירוט נוסף אם יש",
       "amount": 123.45,
@@ -267,8 +273,36 @@ ${extractedText.slice(0, 30000)}
           merchant = 'עסקה ללא שם';
         }
 
-        const isCredit = line.includes('זכות') || line.includes('זיכוי') || line.includes('משכורת') || line.includes('הפקדה');
-        const txType = isCredit ? 'income' : 'expense';
+        const isIncome =
+          line.includes('זכות') ||
+          line.includes('זיכוי') ||
+          line.includes('משכורת') ||
+          line.includes('הפקדה') ||
+          line.includes('שכר') ||
+          line.includes('העברה מ-') ||
+          line.includes('העברה מחשבון') ||
+          line.includes('תקבול') ||
+          line.includes('קצבה') ||
+          line.includes('דיבידנד') ||
+          line.includes('ביטוח לאומי') ||
+          line.includes('מענק');
+
+        const isTransfer = line.includes('העברה עצמית') || line.includes('בין חשבונות');
+        const isRefund = line.includes('זיכוי') && !line.includes('זיכוי שכר');
+
+        let txType: string = 'expense';
+        let txCat = 'כללי';
+
+        if (isTransfer) {
+          txType = 'transfer';
+          txCat = 'העברות ומזומן';
+        } else if (isRefund) {
+          txType = 'refund';
+          txCat = 'החזרים וזיכויים';
+        } else if (isIncome) {
+          txType = 'income';
+          txCat = 'משכורת והכנסות';
+        }
 
         localTransactions.push({
           date: normalizedDate,
@@ -276,7 +310,7 @@ ${extractedText.slice(0, 30000)}
           description: merchant,
           amount: numAmount,
           type: txType,
-          category: isCredit ? 'משכורת והכנסות' : 'כללי',
+          category: txCat,
           currency: 'ILS',
           isRecurring: false,
           confidenceScore: 0.85,

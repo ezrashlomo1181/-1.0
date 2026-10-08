@@ -9,6 +9,7 @@ import {
   LearnedRule,
   DataQualityReport,
   UploadedDocument,
+  FinancialCycleConfig,
 } from '../types/financial';
 import {
   INITIAL_ACCOUNTS,
@@ -35,6 +36,7 @@ export interface AppState {
   learnedRules: LearnedRule[];
   dataQuality: DataQualityReport;
   documents: UploadedDocument[];
+  financialCycle?: FinancialCycleConfig | null;
 }
 
 const STORAGE_KEY = 'matzpen_financial_app_state_v1';
@@ -180,5 +182,29 @@ export function clearUserSpecificState(userId: string): void {
     localStorage.removeItem(getUserStorageKey(userId));
   } catch (e) {
     console.error(`Failed to clear isolated financial state for user ${userId}:`, e);
+  }
+}
+
+// Global/persistent learned category rules storage
+const LEARNED_RULES_KEY = 'matzpen_learned_rules_v1';
+
+export function getStoredLearnedRules(): LearnedRule[] {
+  try {
+    const raw = localStorage.getItem(LEARNED_RULES_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed)) return parsed;
+    }
+  } catch (e) {
+    console.warn('Failed to load learned rules from localStorage:', e);
+  }
+  return [];
+}
+
+export function saveStoredLearnedRules(rules: LearnedRule[]): void {
+  try {
+    localStorage.setItem(LEARNED_RULES_KEY, JSON.stringify(rules));
+  } catch (e) {
+    console.error('Failed to save learned rules to localStorage:', e);
   }
 }

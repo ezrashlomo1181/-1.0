@@ -13,6 +13,8 @@ import {
   loadUserSpecificState,
   saveUserSpecificState,
   createEmptyUserState,
+  getStoredLearnedRules,
+  saveStoredLearnedRules,
   AppState,
 } from './services/storage';
 import {
@@ -24,6 +26,7 @@ import {
   InvestmentAsset,
   UploadedDocument,
   UserProfile,
+  FinancialCycleConfig,
 } from './types/financial';
 import { deduplicateTransactions, parseFinancialDocument } from './services/documentParser';
 import { Sidebar, NavSection } from './components/Sidebar';
@@ -37,6 +40,7 @@ import { UserOnboardingModal } from './components/UserOnboardingModal';
 
 // Views
 import { DashboardView } from './views/DashboardView';
+import { HistoryView } from './views/HistoryView';
 import { TransactionsView } from './views/TransactionsView';
 import { BudgetView } from './views/BudgetView';
 import { GoalsView } from './views/GoalsView';
@@ -155,33 +159,67 @@ export default function App() {
     createRuleOption: 'all_similar' | 'exact_only' | 'none'
   ) => {
     setState((prev) => {
-      const updatedTxs = prev.transactions.map((t) =>
-        t.id === transactionId
-          ? {
-              ...t,
-              category: chosenCategory,
-              needsReview: false,
-              userConfirmed: true,
-              confidenceScore: 1.0,
-              confidenceLevel: 'high' as const,
-            }
-          : t
-      );
+      const targetTx = prev.transactions.find((t) => t.id === transactionId);
+      const pattern = targetTx?.merchant || chosenCategory;
+      const txType = targetTx?.type || 'expense';
 
       let newRules = [...prev.learnedRules];
+      let ruleToSave: LearnedRule | null = null;
+
       if (createRuleOption !== 'none') {
-        const targetTx = prev.transactions.find((t) => t.id === transactionId);
-        newRules.push({
+        ruleToSave = {
           id: `rule-${Date.now()}`,
-          pattern: targetTx?.merchant || chosenCategory,
+          pattern,
           applyTo: createRuleOption,
           assignedCategory: chosenCategory,
-          assignedType: 'expense',
+          assignedType: txType,
           createdAt: new Date().toISOString().split('T')[0],
-          userPromptBasis: `אישור משתמש עבור ${targetTx?.merchant || chosenCategory}`,
+          userPromptBasis: `אישור משתמש עבור ${pattern}`,
           timesApplied: 1,
-        });
+        };
+
+        // Add to state rules (avoid duplicate pattern)
+        newRules = [
+          ruleToSave,
+          ...newRules.filter((r) => r.pattern.toLowerCase() !== pattern.toLowerCase()),
+        ];
+
+        // Persist to persistent storage for future document imports
+        saveStoredLearnedRules(newRules);
       }
+
+      // Update the resolved transaction + optionally other similar transactions if rule is all_similar
+      const patLower = pattern.trim().toLowerCase();
+      const updatedTxs = prev.transactions.map((t) => {
+        if (t.id === transactionId) {
+          return {
+            ...t,
+            category: chosenCategory,
+            needsReview: false,
+            userConfirmed: true,
+            confidenceScore: 1.0,
+            confidenceLevel: 'high' as const,
+            userNotes: userNotes || t.userNotes,
+          };
+        }
+
+        // If user selected all_similar, also apply immediately to other unconfirmed/in-review transactions matching pattern
+        if (
+          createRuleOption === 'all_similar' &&
+          (t.merchant.toLowerCase().includes(patLower) || patLower.includes(t.merchant.toLowerCase()))
+        ) {
+          return {
+            ...t,
+            category: chosenCategory,
+            needsReview: false,
+            userConfirmed: true,
+            confidenceScore: 1.0,
+            confidenceLevel: 'high' as const,
+          };
+        }
+
+        return t;
+      });
 
       return {
         ...prev,
@@ -236,6 +274,7 @@ export default function App() {
   };
 
   const handleUpdateRules = (updated: LearnedRule[]) => {
+    saveStoredLearnedRules(updated);
     setState((prev) => ({ ...prev, learnedRules: updated }));
   };
 
@@ -273,7 +312,12 @@ export default function App() {
 
     setState((prev) => {
       // 1. Deduplicate new transactions against existing user transactions
-      const { uniqueTxs } = deduplicateTransactions(prev.transactions, extractedTransactions);
+      const { uniqueTxs, updatedExistingTxs } = deduplicateTransactions(prev.transactions, extractedTransactions);
+      const baseTxs = updatedExistingTxs || prev.transactions;
+      const combinedTxs = [...uniqueTxs, ...baseTxs];
+
+      // Maintain descending chronological order (newest date on top)
+      combinedTxs.sort((a, b) => b.date.localeCompare(a.date));
 
       const newDoc: UploadedDocument = {
         id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
@@ -310,7 +354,7 @@ export default function App() {
         ...prev,
         accounts: newAccounts,
         documents: [newDoc, ...prev.documents],
-        transactions: [...uniqueTxs, ...prev.transactions],
+        transactions: combinedTxs,
         dataQuality: {
           ...prev.dataQuality,
           overallScore: Math.min(100, Math.max(prev.dataQuality.overallScore, 40) + Math.min(25, uniqueTxs.length * 2)),
@@ -685,6 +729,20 @@ export default function App() {
               onOpenReviewTransaction={handleOpenReviewModal}
               financialProfileCompletion={profileCompletionScore}
               onLoadDemoData={handleResetDemoData}
+            />
+          )}
+
+          {currentSection === 'history' && (
+            <HistoryView
+              transactions={state.transactions}
+              financialCycle={state.financialCycle}
+              onApproveCycle={(cycleConfig: FinancialCycleConfig) => {
+                setState((prev) => ({ ...prev, financialCycle: cycleConfig }));
+              }}
+              onDismissCycle={() => {
+                // Keep current calendar-only without forced cycle
+              }}
+              onOpenReviewModal={handleOpenReviewModal}
             />
           )}
 

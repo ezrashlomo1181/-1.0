@@ -16,11 +16,13 @@ import {
   X,
   Compass,
   FlaskConical,
+  History,
 } from 'lucide-react';
 import { areTestingToolsEnabled } from '../config/testingConfig';
 
 export type NavSection =
   | 'dashboard'
+  | 'history'
   | 'transactions'
   | 'budget'
   | 'goals'
@@ -50,6 +52,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 }) => {
   const navItems = [
     { id: 'dashboard', label: 'דף הבית', icon: LayoutDashboard },
+    { id: 'history', label: 'היסטוריה חודשית', icon: History },
     {
       id: 'transactions',
       label: 'עסקאות',
