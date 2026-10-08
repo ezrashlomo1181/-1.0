@@ -12,7 +12,9 @@ import {
   calculateNetWorth,
   calculateMonthlyCashFlow,
   getCashFlowHistory,
-  getCategoryBreakdown,
+  calculateCashFlowForPeriod,
+  calculatePersonalHistoricalAverages,
+  CURRENT_APP_MONTH,
   CategorySummary,
   MonthDataPoint,
 } from '../services/financialCalculations';
@@ -20,15 +22,19 @@ import { CashFlowChart } from '../components/charts/CashFlowChart';
 import { ExpenseCategoryDonut } from '../components/charts/ExpenseCategoryDonut';
 import {
   TrendingUp,
+  TrendingDown,
   Wallet,
   PiggyBank,
   BadgePercent,
   AlertTriangle,
   ArrowUpRight,
+  ArrowDownRight,
   ChevronLeft,
   Calendar,
   FileSearch,
   CheckCircle2,
+  Sparkles,
+  ArrowRightLeft,
 } from 'lucide-react';
 
 interface DashboardViewProps {
@@ -188,10 +194,51 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     );
   }
 
+  // Real calculations
   const netWorth = calculateNetWorth(accounts);
-  const cashFlow = calculateMonthlyCashFlow(transactions, accounts);
-  const cashFlowHistory = getCashFlowHistory(transactions, 6);
-  const categories = getCategoryBreakdown(transactions);
+  const latestPeriod = calculateCashFlowForPeriod(transactions);
+  const cashFlowHistory = getCashFlowHistory(transactions, 8);
+
+  // Distinct available months strictly bounded
+  const validNonTransfer = transactions.filter(
+    (t) => !t.isInternalTransfer && t.type !== 'transfer' && t.date
+  );
+  const distinctMonths = Array.from(
+    new Set(validNonTransfer.map((t) => t.date.substring(0, 7)).filter((k) => k <= CURRENT_APP_MONTH))
+  ).sort((a, b) => b.localeCompare(a));
+
+  const currentPeriodKey = latestPeriod.monthKey;
+  const prevMonthKey = distinctMonths.find((m) => m < currentPeriodKey);
+  const prevPeriod = prevMonthKey ? calculateCashFlowForPeriod(transactions, prevMonthKey) : null;
+  const personalAverages = calculatePersonalHistoricalAverages(transactions, currentPeriodKey);
+
+  // Diffs vs previous month
+  const expenseDiffVsPrev = prevPeriod ? latestPeriod.expenses - prevPeriod.expenses : null;
+  const expensePctVsPrev =
+    prevPeriod && prevPeriod.expenses > 0
+      ? Math.round(((latestPeriod.expenses - prevPeriod.expenses) / prevPeriod.expenses) * 100)
+      : null;
+
+  const incomeDiffVsPrev = prevPeriod ? latestPeriod.income - prevPeriod.income : null;
+  const incomePctVsPrev =
+    prevPeriod && prevPeriod.income > 0
+      ? Math.round(((latestPeriod.income - prevPeriod.income) / prevPeriod.income) * 100)
+      : null;
+
+  const savingsDiffVsPrev = prevPeriod ? latestPeriod.netCashFlow - prevPeriod.netCashFlow : null;
+
+  // Diffs vs personal historical average
+  const expenseDiffVsAvg = personalAverages.hasSufficientHistory
+    ? latestPeriod.expenses - personalAverages.averageMonthlyExpenses
+    : null;
+  const expensePctVsAvg =
+    personalAverages.hasSufficientHistory && personalAverages.averageMonthlyExpenses > 0
+      ? Math.round(
+          ((latestPeriod.expenses - personalAverages.averageMonthlyExpenses) /
+            personalAverages.averageMonthlyExpenses) *
+            100
+        )
+      : null;
 
   // Budget overall calculation
   const totalBudgeted = budgets.reduce((sum, b) => sum + b.allocated, 0);
@@ -207,9 +254,132 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   // Find any transactions that need review
   const pendingReviews = transactions.filter((t) => t.needsReview);
 
+  // Real dynamic "What Changed" / Anomaly highlights
+  interface DynamicInsight {
+    id: string;
+    type: 'increase' | 'decrease' | 'refund' | 'review' | 'savings' | 'neutral';
+    title: string;
+    description: string;
+    badge?: string;
+    badgeColor?: 'rose' | 'emerald' | 'amber' | 'blue' | 'slate';
+    transactionsToTrace?: Transaction[];
+    amountToTrace?: number;
+    traceTitle?: string;
+    actionText?: string;
+    onAction?: () => void;
+  }
+
+  const dynamicInsights: DynamicInsight[] = [];
+
+  // 1. Pending reviews alert
+  if (pendingReviews.length > 0) {
+    dynamicInsights.push({
+      id: 'pending-reviews',
+      type: 'review',
+      title: `זוהו ${pendingReviews.length} עסקאות ללא ודאות סיווג מלאה`,
+      description: `עקרון המערכת: כשאין ודאות מלאה – שואלים אותך במקום לנחש. עסקאות אלו דורשות אימות ידני קצר.`,
+      badge: 'דורש אימות',
+      badgeColor: 'amber',
+      actionText: 'אמת עסקאות',
+      onAction: () => onOpenReviewTransaction(pendingReviews[0]),
+    });
+  }
+
+  // 2. Refunds that reduced expenses
+  if (latestPeriod.refunds > 0) {
+    const refundTxs = latestPeriod.transactions.filter((t) => t.type === 'refund');
+    dynamicInsights.push({
+      id: 'refunds-detected',
+      type: 'refund',
+      title: `נקלטו ₪${latestPeriod.refunds.toLocaleString()} כזיכויים והחזרים שהקטינו הוצאות`,
+      description: `החזרים מבתי עסק הופחתו אוטומטית מסך ההוצאות החודשיות (במקום להיספר כהכנסה כוזבת).`,
+      badge: 'זיכוי מקטין הוצאה',
+      badgeColor: 'emerald',
+      transactionsToTrace: refundTxs,
+      amountToTrace: latestPeriod.refunds,
+      traceTitle: `החזרים וזיכויים בחודש ${latestPeriod.monthLabel}`,
+    });
+  }
+
+  // 3. Significant category shifts vs previous month or personal average
+  for (const cat of latestPeriod.categoryBreakdown) {
+    const prevCatAmount = prevPeriod
+      ? prevPeriod.categoryBreakdown.find((c) => c.category === cat.category)?.amount || 0
+      : personalAverages.averageCategorySpending[cat.category] || 0;
+
+    if (prevCatAmount > 0) {
+      const diff = cat.amount - prevCatAmount;
+      const pct = Math.round((diff / prevCatAmount) * 100);
+
+      if (pct >= 20 && Math.abs(diff) >= 200) {
+        dynamicInsights.push({
+          id: `cat-increase-${cat.category}`,
+          type: 'increase',
+          title: `עלייה של ${pct}% בהוצאות ${cat.category}`,
+          description: `ההוצאות עמדו על ₪${cat.amount.toLocaleString()} לעומת ₪${prevCatAmount.toLocaleString()} ${
+            prevPeriod ? 'בחודש הקודם' : 'בממוצע האישי'
+          }.`,
+          badge: `+₪${diff.toLocaleString()}`,
+          badgeColor: 'rose',
+          transactionsToTrace: cat.transactions,
+          amountToTrace: cat.amount,
+          traceTitle: `הוצאות ${cat.category} בחודש ${latestPeriod.monthLabel}`,
+        });
+      } else if (pct <= -20 && Math.abs(diff) >= 200) {
+        dynamicInsights.push({
+          id: `cat-decrease-${cat.category}`,
+          type: 'decrease',
+          title: `ירידה וחיסכון של ${Math.abs(pct)}% בהוצאות ${cat.category}`,
+          description: `ההוצאות הצטמצמו ל-₪${cat.amount.toLocaleString()} לעומת ₪${prevCatAmount.toLocaleString()} ${
+            prevPeriod ? 'בחודש הקודם' : 'בממוצע האישי'
+          }.`,
+          badge: `-₪${Math.abs(diff).toLocaleString()}`,
+          badgeColor: 'emerald',
+          transactionsToTrace: cat.transactions,
+          amountToTrace: cat.amount,
+          traceTitle: `הוצאות ${cat.category} בחודש ${latestPeriod.monthLabel}`,
+        });
+      }
+    }
+  }
+
+  // 4. Savings rate shift
+  if (latestPeriod.income > 0 && prevPeriod && prevPeriod.income > 0) {
+    const rateDiff = latestPeriod.savingsRate - prevPeriod.savingsRate;
+    if (Math.abs(rateDiff) >= 4) {
+      dynamicInsights.push({
+        id: 'savings-rate-shift',
+        type: rateDiff > 0 ? 'savings' : 'neutral',
+        title: rateDiff > 0 ? `שיפור בשיעור החיסכון: ${latestPeriod.savingsRate}%` : `שיעור החיסכון עומד על ${latestPeriod.savingsRate}%`,
+        description: `שיעור החיסכון ${rateDiff > 0 ? 'עלה' : 'השתנה'} ב-${Math.abs(rateDiff)}% ביחס לחודש ${
+          prevPeriod.monthLabel
+        } (${prevPeriod.savingsRate}%).`,
+        badge: `${rateDiff > 0 ? '+' : ''}${rateDiff}%`,
+        badgeColor: rateDiff > 0 ? 'emerald' : 'slate',
+        transactionsToTrace: latestPeriod.transactions,
+        amountToTrace: latestPeriod.netCashFlow,
+        traceTitle: `תזרים וחיסכון בחודש ${latestPeriod.monthLabel}`,
+      });
+    }
+  }
+
+  // 5. Fallback reassurance if no anomalies
+  if (dynamicInsights.length === 0) {
+    dynamicInsights.push({
+      id: 'stable-cashflow',
+      type: 'neutral',
+      title: `תזרים יציב ומאוזן בחודש ${latestPeriod.monthLabel}`,
+      description: personalAverages.hasSufficientHistory
+        ? `סך ההוצאות החודש (₪${latestPeriod.expenses.toLocaleString()}) תואם את הממוצע האישי שלך (₪${personalAverages.averageMonthlyExpenses.toLocaleString()}).`
+        : `הנתונים מחושבים ישירות ובאופן שקוף מקובצי המקור שייבאת.`,
+      badge: '100% נתוני אמת',
+      badgeColor: 'slate',
+    });
+  }
+
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-200">
-      {/* Top Banner if items need review (Instruction #4) */}
+      {/* Top Banner if items need review */}
       {pendingReviews.length > 0 && (
         <div className="bg-amber-50 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-900/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs transition-colors">
           <div className="flex items-start sm:items-center gap-3">
@@ -235,120 +405,178 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       )}
 
-      {/* 1. FINANCIAL OVERVIEW CARDS */}
+      {/* 1. FINANCIAL SNAPSHOT FOR CURRENT / ACTIVE PERIOD */}
       <div>
         <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-bold text-[#0F172A] dark:text-white flex items-center gap-2">
-            <span>מבט-על פיננסי</span>
-            <span className="text-xs font-normal text-slate-500 dark:text-slate-400">
-              (מנוטרל העברות פנימיות)
+          <div className="flex items-center gap-2">
+            <h2 className="text-sm font-bold text-[#0F172A] dark:text-white flex items-center gap-1.5">
+              <Calendar className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+              <span>תמונת מצב חודשית: {latestPeriod.monthLabel}</span>
+            </h2>
+            <span className="text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
+              {latestPeriod.transactionCount} עסקאות
             </span>
-          </h2>
+          </div>
           <button
             onClick={() =>
               onOpenTraceModal(
-                'סך כל התנועות והחשבונות',
-                netWorth.totalNetWorth,
-                transactions
+                `תזרים חודש ${latestPeriod.monthLabel}`,
+                latestPeriod.expenses,
+                latestPeriod.transactions
               )
             }
             className="text-xs text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white flex items-center gap-1 font-medium cursor-pointer"
           >
             <FileSearch className="w-3.5 h-3.5 text-slate-600 dark:text-slate-300" />
-            <span>שקיפות חישוב</span>
+            <span>שקיפות חישוב החודש</span>
           </button>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-          {/* Net Worth Card */}
+          {/* Income Card */}
           <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs transition-colors">
             <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
-              <span>שווי פיננסי נטו</span>
-              <span className="text-emerald-700 dark:text-emerald-400 font-mono font-medium bg-emerald-50 dark:bg-emerald-950/40 px-1.5 py-0.2 rounded text-[11px] border border-emerald-100 dark:border-emerald-900/40">
-                +4.8% ב-6 חודשים
-              </span>
+              <span>הכנסות החודש</span>
+              {incomePctVsPrev !== null && (
+                <span
+                  className={`font-mono font-medium px-1.5 py-0.2 rounded text-[11px] border ${
+                    incomePctVsPrev >= 0
+                      ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-100 dark:border-emerald-900/40'
+                      : 'text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-950/40 border-amber-100 dark:border-amber-900/40'
+                  }`}
+                >
+                  {incomePctVsPrev >= 0 ? '+' : ''}
+                  {incomePctVsPrev}% מחודש קודם
+                </span>
+              )}
             </div>
-            <div className="text-2xl font-bold text-[#0F172A] dark:text-white font-mono mt-1">
-              ₪{netWorth.totalNetWorth.toLocaleString()}
+            <div className="text-2xl font-bold text-emerald-700 dark:text-emerald-400 font-mono mt-1">
+              ₪{latestPeriod.income.toLocaleString()}
             </div>
-            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-[#1F2937] flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-              <span>נכסים: ₪{netWorth.totalAssets.toLocaleString()}</span>
-              <span>התחייבויות: ₪{netWorth.totalLiabilities.toLocaleString()}</span>
+            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-[#1F2937] text-[11px] text-slate-500 dark:text-slate-400">
+              {latestPeriod.incomeBreakdown.length > 0 ? (
+                <span>מקור מוביל: {latestPeriod.incomeBreakdown[0].source}</span>
+              ) : (
+                <span>משכורת והפקדות תקבולים</span>
+              )}
             </div>
           </div>
 
-          {/* Cash & Liquid Card */}
+          {/* Net Expenses Card */}
           <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs transition-colors">
             <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
-              <span>כסף נזיל ופקדונות</span>
-              <Wallet className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+              <span>הוצאות החודש (נטו)</span>
+              {expensePctVsPrev !== null && (
+                <span
+                  className={`font-mono font-medium px-1.5 py-0.2 rounded text-[11px] border ${
+                    expensePctVsPrev <= 0
+                      ? 'text-emerald-700 dark:text-emerald-400 bg-emerald-50 dark:bg-emerald-950/40 border-emerald-100 dark:border-emerald-900/40'
+                      : 'text-rose-700 dark:text-rose-400 bg-rose-50 dark:bg-rose-950/40 border-rose-100 dark:border-rose-900/40'
+                  }`}
+                >
+                  {expensePctVsPrev > 0 ? '+' : ''}
+                  {expensePctVsPrev}% מחודש קודם
+                </span>
+              )}
             </div>
-            <div className="text-2xl font-bold text-[#0F172A] dark:text-white font-mono mt-1">
-              ₪{(netWorth.cashAndLiquid + netWorth.savings).toLocaleString()}
+            <div className="text-2xl font-bold text-rose-700 dark:text-rose-400 font-mono mt-1">
+              ₪{latestPeriod.expenses.toLocaleString()}
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100 dark:border-[#1F2937] flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-              <span>עו״ש: ₪{netWorth.cashAndLiquid.toLocaleString()}</span>
-              <span>חיסכון: ₪{netWorth.savings.toLocaleString()}</span>
+              <span>ברוטו: ₪{latestPeriod.grossExpenses.toLocaleString()}</span>
+              {latestPeriod.refunds > 0 ? (
+                <span className="text-emerald-600 dark:text-emerald-400 font-medium">
+                  זיכויים: -₪{latestPeriod.refunds.toLocaleString()}
+                </span>
+              ) : (
+                <span>ללא זיכויים</span>
+              )}
             </div>
           </div>
 
-          {/* Investments Card */}
-          <div
-            onClick={() => onNavigateToSection('investments')}
-            className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs cursor-pointer hover:border-slate-300 dark:hover:border-slate-700 transition-colors"
-          >
+          {/* Net Cash Flow / Savings Card */}
+          <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs transition-colors">
             <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
-              <span>תיק השקעות וגמל</span>
-              <TrendingUp className="w-4 h-4 text-slate-600 dark:text-slate-400" />
+              <span>תזרים פנוי (חיסכון)</span>
+              <ArrowRightLeft className="w-4 h-4 text-slate-600 dark:text-slate-400" />
             </div>
-            <div className="text-2xl font-bold text-[#0F172A] dark:text-white font-mono mt-1">
-              ₪{netWorth.investments.toLocaleString()}
+            <div
+              className={`text-2xl font-bold font-mono mt-1 ${
+                latestPeriod.netCashFlow >= 0
+                  ? 'text-emerald-700 dark:text-emerald-400'
+                  : 'text-rose-700 dark:text-rose-400'
+              }`}
+            >
+              {latestPeriod.netCashFlow >= 0 ? '+' : ''}₪{latestPeriod.netCashFlow.toLocaleString()}
             </div>
             <div className="mt-3 pt-3 border-t border-slate-100 dark:border-[#1F2937] flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-              <span>רווח לא ממומש:</span>
-              <span className="text-emerald-700 dark:text-emerald-400 font-mono font-medium">
-                +₪{totalUnrealizedGain.toLocaleString()} ({overallPortfolioReturn}%)
-              </span>
+              <span>שיעור חיסכון: {latestPeriod.savingsRate}%</span>
+              {savingsDiffVsPrev !== null && (
+                <span className={savingsDiffVsPrev >= 0 ? 'text-emerald-600' : 'text-rose-600'}>
+                  {savingsDiffVsPrev >= 0 ? '+' : ''}₪{savingsDiffVsPrev.toLocaleString()} מחודש קודם
+                </span>
+              )}
             </div>
           </div>
 
-          {/* Monthly Savings Rate Card */}
+          {/* Personal Average Comparison / Net Worth Card */}
           <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs transition-colors">
             <div className="flex items-center justify-between text-xs text-slate-500 dark:text-slate-400 mb-1">
-              <span>שיעור חיסכון חודשי</span>
+              <span>ממוצע אישי חודשי</span>
               <BadgePercent className="w-4 h-4 text-slate-600 dark:text-slate-400" />
             </div>
             <div className="text-2xl font-bold text-[#0F172A] dark:text-white font-mono mt-1">
-              {cashFlow.savingsRate}%
+              {personalAverages.hasSufficientHistory
+                ? `₪${personalAverages.averageMonthlyExpenses.toLocaleString()}`
+                : `₪${latestPeriod.expenses.toLocaleString()}`}
             </div>
-            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-[#1F2937] flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400">
-              <span>חיסכון נטו: ₪{cashFlow.monthlySavings.toLocaleString()}</span>
-              <span>כרית: {cashFlow.liquidRunwayMonths} חודשים</span>
+            <div className="mt-3 pt-3 border-t border-slate-100 dark:border-[#1F2937] text-[11px] text-slate-500 dark:text-slate-400">
+              {personalAverages.hasSufficientHistory ? (
+                <span>
+                  הפרש החודש מהממוצע:{' '}
+                  <strong
+                    className={
+                      expenseDiffVsAvg !== null && expenseDiffVsAvg > 0
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : 'text-emerald-600 dark:text-emerald-400'
+                    }
+                  >
+                    {expenseDiffVsAvg !== null && expenseDiffVsAvg > 0 ? '+' : ''}
+                    ₪{expenseDiffVsAvg?.toLocaleString()}
+                  </strong>
+                </span>
+              ) : (
+                <span>נצבר היסטוריה של {personalAverages.completedMonthsCount} חודשים</span>
+              )}
             </div>
           </div>
         </div>
       </div>
 
-      {/* 2. CASH FLOW & EXPENSE BREAKDOWN CHARTS */}
+      {/* 2. CASH FLOW TREND & EXPENSE BREAKDOWN CHARTS */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         <div className="lg:col-span-7">
           <CashFlowChart
             data={cashFlowHistory}
+            personalAverageExpense={
+              personalAverages.hasSufficientHistory ? personalAverages.averageMonthlyExpenses : undefined
+            }
+            budgetTargetExpense={totalBudgeted > 0 ? totalBudgeted : undefined}
             onMonthClick={(m: MonthDataPoint) => {
               onOpenTraceModal(
                 `תזרים חודש ${m.monthLabel}`,
                 m.expense,
-                transactions.filter((t) => !t.isInternalTransfer)
+                transactions.filter((t) => !t.isInternalTransfer && t.date && t.date.startsWith(m.monthKey))
               );
             }}
           />
         </div>
         <div className="lg:col-span-5">
           <ExpenseCategoryDonut
-            categories={categories}
+            categories={latestPeriod.categoryBreakdown}
             onSelectCategory={(cat: CategorySummary) => {
               onOpenTraceModal(
-                `הוצאות בקטגוריית ${cat.category}`,
+                `הוצאות בקטגוריית ${cat.category} (${latestPeriod.monthLabel})`,
                 cat.amount,
                 cat.transactions
               );
@@ -357,7 +585,78 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         </div>
       </div>
 
-      {/* 3. BUDGET STATUS & ACTIVE GOALS */}
+      {/* 3. DYNAMIC "WHAT CHANGED" & ANOMALY HIGHLIGHTS */}
+      <div className="bg-white dark:bg-[#111827] rounded-xl border border-slate-200 dark:border-[#1F2937] p-5 shadow-xs transition-colors space-y-4">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-4 h-4 text-amber-500" />
+            <h3 className="text-sm font-bold text-[#0F172A] dark:text-white">
+              מה השתנה החודש? (תובנות ושינויים מבוססי נתונים)
+            </h3>
+          </div>
+          <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
+            השוואה מול חודש קודם וממוצע אישי
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-3">
+          {dynamicInsights.map((insight) => (
+            <div
+              key={insight.id}
+              onClick={() => {
+                if (insight.onAction) {
+                  insight.onAction();
+                } else if (insight.transactionsToTrace) {
+                  onOpenTraceModal(
+                    insight.traceTitle || insight.title,
+                    insight.amountToTrace || 0,
+                    insight.transactionsToTrace
+                  );
+                }
+              }}
+              className={`p-3.5 rounded-xl border transition-all cursor-pointer space-y-2 ${
+                insight.badgeColor === 'rose'
+                  ? 'bg-rose-50/40 dark:bg-rose-950/20 border-rose-200 dark:border-rose-900/40 hover:border-rose-300'
+                  : insight.badgeColor === 'emerald'
+                  ? 'bg-emerald-50/40 dark:bg-emerald-950/20 border-emerald-200 dark:border-emerald-900/40 hover:border-emerald-300'
+                  : insight.badgeColor === 'amber'
+                  ? 'bg-amber-50/40 dark:bg-amber-950/20 border-amber-200 dark:border-amber-900/40 hover:border-amber-300'
+                  : 'bg-slate-50 dark:bg-[#0B0F17] border-slate-200 dark:border-[#1F2937] hover:border-slate-300'
+              }`}
+            >
+              <div className="flex items-start justify-between gap-2">
+                <h4 className="text-xs font-bold text-[#0F172A] dark:text-white leading-tight">
+                  {insight.title}
+                </h4>
+                {insight.badge && (
+                  <span
+                    className={`font-mono text-[10px] font-bold px-1.5 py-0.5 rounded flex-shrink-0 ${
+                      insight.badgeColor === 'rose'
+                        ? 'bg-rose-100 dark:bg-rose-900/50 text-rose-800 dark:text-rose-300'
+                        : insight.badgeColor === 'emerald'
+                        ? 'bg-emerald-100 dark:bg-emerald-900/50 text-emerald-800 dark:text-emerald-300'
+                        : insight.badgeColor === 'amber'
+                        ? 'bg-amber-100 dark:bg-amber-900/50 text-amber-800 dark:text-amber-300'
+                        : 'bg-slate-200 dark:bg-slate-800 text-slate-700 dark:text-slate-300'
+                    }`}
+                  >
+                    {insight.badge}
+                  </span>
+                )}
+              </div>
+              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+                {insight.description}
+              </p>
+              <div className="pt-1 flex items-center justify-between text-[11px] text-slate-500 dark:text-slate-400 font-medium">
+                <span>{insight.actionText || 'צפה בפירוט העסקאות'}</span>
+                <ChevronLeft className="w-3 h-3" />
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* 4. BUDGET STATUS & ACTIVE GOALS */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
         {/* Budget Status */}
         <div className="lg:col-span-6 bg-white dark:bg-[#111827] rounded-xl border border-slate-200 dark:border-[#1F2937] p-5 shadow-xs transition-colors">
@@ -477,119 +776,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           </div>
         </div>
       </div>
-
-      {/* 4. FINANCIAL INSIGHTS & UPCOMING COMMITMENTS */}
-      <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-        {/* Meaningful Financial Insights */}
-        <div className="lg:col-span-7 bg-white dark:bg-[#111827] rounded-xl border border-slate-200 dark:border-[#1F2937] p-5 shadow-xs transition-colors">
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-bold text-[#0F172A] dark:text-white">תובנות פיננסיות מבוססות נתונים</h3>
-            <span className="text-[10px] text-slate-500 dark:text-slate-400 font-mono bg-slate-100 dark:bg-slate-800 px-2 py-0.5 rounded border border-slate-200 dark:border-slate-700">
-              100% על בסיס עסקאותיך
-            </span>
-          </div>
-
-          <div className="space-y-2.5">
-            <div
-              onClick={() =>
-                onOpenTraceModal(
-                  'הוצאות מזון וסופר החודש',
-                  2370,
-                  transactions.filter((t) => t.category === 'מזון וסופר')
-                )
-              }
-              className="p-3 rounded-lg bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] hover:border-slate-300 dark:hover:border-slate-700 cursor-pointer transition-colors space-y-1"
-            >
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-[#0F172A] dark:text-white flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-amber-600 dark:bg-amber-400" />
-                  עלייה של 18% בהוצאות מזון וסופר
-                </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-0.5">
-                  <span>צפה בחישוב</span>
-                  <ChevronLeft className="w-3 h-3" />
-                </span>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                הוצאות המזון עמדו על ₪2,370 לעומת ממוצע של ₪2,010 ב-6 החודשים האחרונים. הגידול נובע מ-3 קניות גדולות בשופרסל.
-              </p>
-            </div>
-
-            <div
-              onClick={() => onNavigateToSection('commitments')}
-              className="p-3 rounded-lg bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] hover:border-slate-300 dark:hover:border-slate-700 cursor-pointer transition-colors space-y-1"
-            >
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-[#0F172A] dark:text-white flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-700 dark:bg-emerald-500" />
-                  זוהו 7 מנויים וחיובים חוזרים קבועים
-                </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-0.5">
-                  <span>לרשימת המנויים</span>
-                  <ChevronLeft className="w-3 h-3" />
-                </span>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                עלותם הכוללת היא כ-₪1,740 בחודש. לא זוהו חיובי כפל או עליות פתאומיות במחיר המנויים.
-              </p>
-            </div>
-
-            <div
-              onClick={() => onNavigateToSection('simulations')}
-              className="p-3 rounded-lg bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] hover:border-slate-300 dark:hover:border-slate-700 cursor-pointer transition-colors space-y-1"
-            >
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-[#0F172A] dark:text-white flex items-center gap-1.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-slate-600 dark:bg-slate-400" />
-                  הזדמנות להאצת יעד דירה ב-8 חודשים
-                </span>
-                <span className="text-[11px] text-slate-500 dark:text-slate-400 flex items-center gap-0.5">
-                  <span>לסימולציה</span>
-                  <ChevronLeft className="w-3 h-3" />
-                </span>
-              </div>
-              <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
-                הגדלת ההפקדה החודשית לחיסכון ב-₪600 נוספים תקרב את השלמת ההון העצמי הנדרש.
-              </p>
-            </div>
-          </div>
-        </div>
-
-        {/* Upcoming Commitments & Bills */}
-        <div className="lg:col-span-5 bg-white dark:bg-[#111827] rounded-xl border border-slate-200 dark:border-[#1F2937] p-5 shadow-xs transition-colors">
-          <div className="flex items-center justify-between mb-4">
-            <div>
-              <h3 className="text-sm font-bold text-[#0F172A] dark:text-white">התחייבויות קרובות</h3>
-              <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">תשלומים צפויים ב-30 הימים הקרובים</p>
-            </div>
-            <button
-              onClick={() => onNavigateToSection('commitments')}
-              className="text-xs text-slate-500 hover:text-slate-900 dark:text-slate-400 dark:hover:text-white cursor-pointer"
-            >
-              הכל
-            </button>
-          </div>
-
-          <div className="space-y-2">
-            {recurring.slice(0, 4).map((rec) => (
-              <div
-                key={rec.id}
-                className="flex items-center justify-between p-2.5 rounded-lg bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] text-xs"
-              >
-                <div>
-                  <div className="font-semibold text-[#0F172A] dark:text-slate-200">{rec.merchant}</div>
-                  <div className="text-[11px] text-slate-500 dark:text-slate-400">
-                    {rec.category} • {rec.accountName}
-                  </div>
-                </div>
-                <div className="text-left font-mono font-bold text-rose-700 dark:text-rose-400">
-                  ₪{rec.monthlyAmount.toLocaleString()}
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </div>
     </div>
   );
 };
+

@@ -37,10 +37,17 @@ export interface Transaction {
   aiReasoning?: string;
   sourceDocument?: string;
   additionalSources?: string[];
+  sourceDocumentType?: 'bank_statement' | 'credit_card_statement' | 'detailed_report' | 'other';
+  originalDate?: string; // original transaction date if normalized
   billingDate?: string; // YYYY-MM-DD
   cyclePeriod?: string; // e.g. "2026-09-10_to_2026-10-09"
   rawText?: string;
   isInternalTransfer?: boolean; // if true, exclude from income/expense calculations
+  reconciliationStatus?: 'unreconciled' | 'reconciled' | 'partial' | 'settlement_matched';
+  linkedTransactionIds?: string[];
+  reconciliationEvidence?: string;
+  isAggregateSettlement?: boolean; // true if bank consolidated card debit matched to detailed transactions
+  isFuture?: boolean; // true if transaction date is in the future relative to current date
 }
 
 export interface Account {

@@ -19,50 +19,79 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
   onDismissAnomaly,
   onOpenReviewModal,
 }) => {
-  const timelineEvents = [
-    {
-      date: '2026-09-26',
-      title: 'רכישת שובר לא מסווג (BUYME)',
-      amount: 500,
-      type: 'warning',
-      desc: 'המערכת זיהתה שובר ללא פירוט וביקשה הבהרת המשתמש.',
-    },
-    {
-      date: '2026-09-20',
-      title: 'רכישה גדולה מעל הרגיל ב-AliExpress',
-      amount: 890,
-      type: 'spike',
-      desc: 'עסקה בינלאומית הגבוהה פי 3.2 מהממוצע.',
-    },
-    {
-      date: '2026-09-18',
-      title: 'זיכוי החזר מס הכנסה',
-      amount: 1200,
-      type: 'income',
-      desc: 'הפקדה חיובית חד-פעמית שסווגה ישירות להכנסות.',
-    },
-    {
-      date: '2026-09-04',
-      title: 'הוראת קבע להשקעות (מיטב טרייד)',
-      amount: 2500,
-      type: 'invest',
-      desc: 'הפקדה חודשית לקרן מחקה מדד S&P 500.',
-    },
-    {
-      date: '2026-09-01',
-      title: 'הפקדת משכורת הייטק',
-      amount: 22400,
-      type: 'income',
-      desc: 'משכורת חודשית נטו שזוהתה בהצלחה.',
-    },
-    {
-      date: '2026-08-15',
-      title: 'פתיחת יעד קרן חירום',
-      amount: 50000,
-      type: 'goal',
-      desc: 'הגדרת יעד של 6 חודשי קיום לפקדון נזיל.',
-    },
-  ];
+  const timelineEvents = React.useMemo(() => {
+    if (!transactions || transactions.length === 0) return [];
+
+    const events: {
+      date: string;
+      title: string;
+      amount: number;
+      type: 'income' | 'invest' | 'warning' | 'spike' | 'refund' | 'expense';
+      desc: string;
+    }[] = [];
+
+    // 1. High value incomes
+    const incomes = transactions
+      .filter((t) => t.type === 'income' && t.amount >= 500)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 3);
+    for (const inc of incomes) {
+      events.push({
+        date: inc.date,
+        title: `הפקדה / הכנסה: ${inc.merchant}`,
+        amount: inc.amount,
+        type: 'income',
+        desc: inc.category === 'משכורת והכנסות' ? 'הפקדת משכורת או תקבול שנקלט בהצלחה' : 'הכנסה שנקלטה במסמכי המקור',
+      });
+    }
+
+    // 2. Refunds
+    const refunds = transactions
+      .filter((t) => t.type === 'refund')
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 3);
+    for (const ref of refunds) {
+      events.push({
+        date: ref.date,
+        title: `זיכוי / החזר כספי: ${ref.merchant}`,
+        amount: ref.amount,
+        type: 'refund',
+        desc: 'החזר כספי שהקטין הוצאה (ולא נספר כהכנסה)',
+      });
+    }
+
+    // 3. Transactions needing review
+    const reviews = transactions
+      .filter((t) => t.needsReview)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 2);
+    for (const rev of reviews) {
+      events.push({
+        date: rev.date,
+        title: `עסקה לאימות: ${rev.merchant}`,
+        amount: rev.amount,
+        type: 'warning',
+        desc: rev.reviewReason || 'דרוש אימות סיווג קטגוריה וסוג תנועה',
+      });
+    }
+
+    // 4. Significant expenses
+    const topExpenses = transactions
+      .filter((t) => (t.type === 'expense' || t.type === 'fee') && t.amount >= 400)
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .slice(0, 3);
+    for (const exp of topExpenses) {
+      events.push({
+        date: exp.date,
+        title: `הוצאה מהותית: ${exp.merchant}`,
+        amount: exp.amount,
+        type: 'expense',
+        desc: `הוצאה בקטגוריית ${exp.category}`,
+      });
+    }
+
+    return events.sort((a, b) => b.date.localeCompare(a.date)).slice(0, 8);
+  }, [transactions]);
 
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-200">
@@ -154,33 +183,39 @@ export const AnalyticsView: React.FC<AnalyticsViewProps> = ({
           </div>
         </div>
 
-        <div className="relative border-r-2 border-slate-200 dark:border-[#1F2937] pr-5 space-y-5 pt-2">
-          {timelineEvents.map((evt, idx) => (
-            <div key={idx} className="relative space-y-0.5">
-              {/* Dot on the timeline */}
-              <div
-                className={`absolute -right-[27px] top-1 w-3.5 h-3.5 rounded-full border-2 border-white dark:border-[#111827] ${
-                  evt.type === 'income'
-                    ? 'bg-emerald-600 dark:bg-emerald-500'
-                    : evt.type === 'invest'
-                    ? 'bg-blue-600 dark:bg-blue-400'
-                    : evt.type === 'warning'
-                    ? 'bg-amber-600 dark:bg-amber-400'
-                    : 'bg-slate-600 dark:bg-slate-400'
-                }`}
-              />
+        {timelineEvents.length === 0 ? (
+          <p className="text-xs text-slate-400 py-6 text-center">
+            טרם נקלטו עסקאות או אירועים פיננסיים בציר הזמן.
+          </p>
+        ) : (
+          <div className="relative border-r-2 border-slate-200 dark:border-[#1F2937] pr-5 space-y-5 pt-2">
+            {timelineEvents.map((evt, idx) => (
+              <div key={idx} className="relative space-y-0.5">
+                {/* Dot on the timeline */}
+                <div
+                  className={`absolute -right-[27px] top-1 w-3.5 h-3.5 rounded-full border-2 border-white dark:border-[#111827] ${
+                    evt.type === 'income'
+                      ? 'bg-emerald-600 dark:bg-emerald-500'
+                      : evt.type === 'invest'
+                      ? 'bg-blue-600 dark:bg-blue-400'
+                      : evt.type === 'warning'
+                      ? 'bg-amber-600 dark:bg-amber-400'
+                      : 'bg-slate-600 dark:bg-slate-400'
+                  }`}
+                />
 
-              <div className="flex items-center justify-between text-xs">
-                <span className="font-semibold text-[#0F172A] dark:text-white">{evt.title}</span>
-                <span className="font-mono text-slate-500 dark:text-slate-400 text-[11px]">{evt.date}</span>
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-semibold text-[#0F172A] dark:text-white">{evt.title}</span>
+                  <span className="font-mono text-slate-500 dark:text-slate-400 text-[11px]">{evt.date}</span>
+                </div>
+                <p className="text-xs text-slate-500 dark:text-slate-400">{evt.desc}</p>
+                <div className="font-mono font-bold text-xs text-[#0F172A] dark:text-slate-100">
+                  ₪{evt.amount.toLocaleString()}
+                </div>
               </div>
-              <p className="text-xs text-slate-500 dark:text-slate-400">{evt.desc}</p>
-              <div className="font-mono font-bold text-xs text-[#0F172A] dark:text-slate-100">
-                ₪{evt.amount.toLocaleString()}
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
     </div>
   );

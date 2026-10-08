@@ -89,41 +89,269 @@ export function calculateNetWorth(accounts: Account[]): NetWorthSummary {
   };
 }
 
-export function calculateMonthlyCashFlow(transactions: Transaction[], accounts: Account[]): MonthlyCashFlowSummary {
-  // CRITICAL: Filter out internal transfers so credit card payments or account transfers aren't counted twice!
-  const validTransactions = transactions.filter(t => !t.isInternalTransfer && t.type !== 'transfer');
+const CURRENT_APP_DATE = '2026-10-08';
+export const CURRENT_APP_MONTH = '2026-10';
+
+export function getCurrentAppMonthKey(): string {
+  return CURRENT_APP_MONTH;
+}
+
+export interface DetailedCashFlowPeriod {
+  monthKey: string;
+  monthLabel: string;
+  income: number;
+  grossExpenses: number;
+  refunds: number;
+  expenses: number; // grossExpenses - refunds
+  netCashFlow: number; // income - expenses
+  savingsRate: number;
+  transfers: number;
+  transactionCount: number;
+  categoryBreakdown: CategorySummary[];
+  incomeBreakdown: { source: string; amount: number; percentage: number }[];
+  transactions: Transaction[];
+  isCurrentMonth: boolean;
+  isFuture: boolean;
+}
+
+export interface PersonalHistoricalAverages {
+  averageMonthlyExpenses: number;
+  averageMonthlyIncome: number;
+  averageMonthlySavings: number;
+  averageCategorySpending: Record<string, number>;
+  completedMonthsCount: number;
+  hasSufficientHistory: boolean;
+  explanationLabel: string;
+}
+
+export interface FinancialMetricComparison {
+  currentValue: number;
+  previousMonthValue?: number;
+  personalAverageValue?: number;
+  diffVsPreviousMonth?: number;
+  percentVsPreviousMonth?: number;
+  diffVsPersonalAverage?: number;
+  percentVsPersonalAverage?: number;
+  hasPreviousMonthData: boolean;
+  hasPersonalAverageData: boolean;
+}
+
+export interface WhatChangedInsight {
+  id: string;
+  type: 'increase' | 'decrease' | 'anomaly' | 'positive' | 'warning' | 'neutral';
+  title: string;
+  description: string;
+  category?: string;
+  amountDiff?: number;
+  percentDiff?: number;
+}
+
+/**
+ * CENTRAL PERIOD CASH FLOW ENGINE
+ * 
+ * Computes strictly bounded financial metrics for a specific month or cycle.
+ * Never leaks multi-month aggregates into single-month reports.
+ * Correctly offsets refunds from relevant category expenses.
+ */
+export function calculateCashFlowForPeriod(
+  transactions: Transaction[],
+  targetMonthKey?: string
+): DetailedCashFlowPeriod {
+  // Filter out internal transfers and consolidated card settlements
+  const validTransactions = transactions.filter((t) => !t.isInternalTransfer && t.type !== 'transfer');
+
+  // Determine which month to calculate
+  let monthKey = targetMonthKey;
+  if (!monthKey) {
+    // Pick the most recent historical month that is <= CURRENT_APP_MONTH
+    const availableMonths = Array.from(
+      new Set(
+        validTransactions
+          .map((t) => t.date?.substring(0, 7))
+          .filter((k) => k && k <= CURRENT_APP_MONTH)
+      )
+    ).sort((a, b) => b.localeCompare(a));
+
+    monthKey = availableMonths[0] || CURRENT_APP_MONTH;
+  }
+
+  // Filter transactions belonging to this exact month
+  const periodTxs = validTransactions.filter((t) => t.date && t.date.startsWith(monthKey!));
 
   let income = 0;
-  let expenses = 0;
+  let grossExpenses = 0;
+  let refunds = 0;
+  let transfers = 0;
 
-  for (const tx of validTransactions) {
+  // Category tracking with refund deduction
+  const categoryMap = new Map<string, { gross: number; refunds: number; items: Transaction[] }>();
+  // Income sources tracking
+  const incomeSourcesMap = new Map<string, number>();
+
+  for (const tx of periodTxs) {
+    const cat = tx.category || 'אחר / ללא סיווג';
+
     if (tx.type === 'income') {
       income += tx.amount;
+      const src = tx.merchant || 'הכנסה';
+      incomeSourcesMap.set(src, (incomeSourcesMap.get(src) || 0) + tx.amount);
     } else if (tx.type === 'refund') {
-      // Refunds reduce expenses rather than appearing as income
-      expenses -= Math.abs(tx.amount);
+      refunds += Math.abs(tx.amount);
+      const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
+      curr.refunds += Math.abs(tx.amount);
+      curr.items.push(tx);
+      categoryMap.set(cat, curr);
     } else if (tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment') {
-      expenses += Math.abs(tx.amount);
+      grossExpenses += Math.abs(tx.amount);
+      const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
+      curr.gross += Math.abs(tx.amount);
+      curr.items.push(tx);
+      categoryMap.set(cat, curr);
+    } else if (tx.type === 'transfer') {
+      transfers += tx.amount;
     }
   }
 
-  // Monthly average approximation (assuming standard 1 month view or total current month)
-  // If dataset has September 2026, calculate current month
-  const monthlySavings = Math.max(0, income - expenses);
-  const savingsRate = income > 0 ? Math.round((monthlySavings / income) * 100) : 0;
+  // Net expenses: gross expenses minus refunds
+  const netExpenses = Math.max(0, grossExpenses - refunds);
+  const netCashFlow = income - netExpenses;
+  const savingsRate = income > 0 ? Math.round((Math.max(0, netCashFlow) / income) * 100) : 0;
 
-  // Liquid Runway
+  // Build category summaries with net expenses
+  const categoryBreakdown: CategorySummary[] = [];
+  categoryMap.forEach((val, cat) => {
+    const netCatAmount = Math.max(0, val.gross - val.refunds);
+    if (netCatAmount > 0 || val.items.length > 0) {
+      const pct = netExpenses > 0 ? Math.round((netCatAmount / netExpenses) * 100) : 0;
+      categoryBreakdown.push({
+        category: cat,
+        amount: Math.round(netCatAmount),
+        percentage: pct,
+        count: val.items.length,
+        transactions: val.items,
+        color: getCategoryColor(cat),
+      });
+    }
+  });
+
+  categoryBreakdown.sort((a, b) => b.amount - a.amount);
+
+  // Income sources breakdown
+  const incomeBreakdown = Array.from(incomeSourcesMap.entries())
+    .map(([source, amount]) => ({
+      source,
+      amount: Math.round(amount),
+      percentage: income > 0 ? Math.round((amount / income) * 100) : 0,
+    }))
+    .sort((a, b) => b.amount - a.amount);
+
+  return {
+    monthKey: monthKey!,
+    monthLabel: formatMonthKeyLabel(monthKey!),
+    income: Math.round(income),
+    grossExpenses: Math.round(grossExpenses),
+    refunds: Math.round(refunds),
+    expenses: Math.round(netExpenses),
+    netCashFlow: Math.round(netCashFlow),
+    savingsRate,
+    transfers: Math.round(transfers),
+    transactionCount: periodTxs.length,
+    categoryBreakdown,
+    incomeBreakdown,
+    transactions: periodTxs,
+    isCurrentMonth: monthKey === CURRENT_APP_MONTH,
+    isFuture: monthKey! > CURRENT_APP_MONTH,
+  };
+}
+
+/**
+ * Standard Monthly Cash Flow Summary used across Dashboard and KPI Cards
+ */
+export function calculateMonthlyCashFlow(
+  transactions: Transaction[],
+  accounts: Account[],
+  targetMonthKey?: string
+): MonthlyCashFlowSummary {
+  const period = calculateCashFlowForPeriod(transactions, targetMonthKey);
   const netWorth = calculateNetWorth(accounts);
-  const liquidRunwayMonths = expenses > 0 
-    ? Number(((netWorth.cashAndLiquid + netWorth.savings) / expenses).toFixed(1))
+  const liquidRunwayMonths = period.expenses > 0
+    ? Number(((netWorth.cashAndLiquid + netWorth.savings) / period.expenses).toFixed(1))
     : 12;
 
   return {
-    monthlyIncome: income,
-    monthlyExpenses: expenses,
-    monthlySavings,
-    savingsRate,
+    monthlyIncome: period.income,
+    monthlyExpenses: period.expenses,
+    monthlySavings: Math.max(0, period.netCashFlow),
+    savingsRate: period.savingsRate,
     liquidRunwayMonths,
+  };
+}
+
+/**
+ * Calculate user's personal historical average from actual complete historical months.
+ * Excludes the current incomplete month to prevent skewing comparisons.
+ */
+export function calculatePersonalHistoricalAverages(
+  transactions: Transaction[],
+  currentMonthKey: string = CURRENT_APP_MONTH
+): PersonalHistoricalAverages {
+  const valid = transactions.filter((t) => !t.isInternalTransfer && t.type !== 'transfer');
+
+  // Find all distinct months strictly before the current month
+  const completedMonthKeys = Array.from(
+    new Set(
+      valid
+        .map((t) => t.date?.substring(0, 7))
+        .filter((k) => k && k < currentMonthKey)
+    )
+  ).sort((a, b) => a.localeCompare(b));
+
+  if (completedMonthKeys.length === 0) {
+    return {
+      averageMonthlyExpenses: 0,
+      averageMonthlyIncome: 0,
+      averageMonthlySavings: 0,
+      averageCategorySpending: {},
+      completedMonthsCount: 0,
+      hasSufficientHistory: false,
+      explanationLabel: 'אין עדיין חודשים מלאים קודמים לחישוב ממוצע אישי',
+    };
+  }
+
+  let totalHistoricalExpenses = 0;
+  let totalHistoricalIncome = 0;
+  let totalHistoricalSavings = 0;
+  const categoryTotals = new Map<string, number>();
+
+  for (const mKey of completedMonthKeys) {
+    const mData = calculateCashFlowForPeriod(transactions, mKey);
+    totalHistoricalExpenses += mData.expenses;
+    totalHistoricalIncome += mData.income;
+    totalHistoricalSavings += Math.max(0, mData.netCashFlow);
+
+    for (const cat of mData.categoryBreakdown) {
+      categoryTotals.set(cat.category, (categoryTotals.get(cat.category) || 0) + cat.amount);
+    }
+  }
+
+  const count = completedMonthKeys.length;
+  const avgExpenses = Math.round(totalHistoricalExpenses / count);
+  const avgIncome = Math.round(totalHistoricalIncome / count);
+  const avgSavings = Math.round(totalHistoricalSavings / count);
+
+  const avgCategorySpending: Record<string, number> = {};
+  categoryTotals.forEach((val, cat) => {
+    avgCategorySpending[cat] = Math.round(val / count);
+  });
+
+  return {
+    averageMonthlyExpenses: avgExpenses,
+    averageMonthlyIncome: avgIncome,
+    averageMonthlySavings: avgSavings,
+    averageCategorySpending: avgCategorySpending,
+    completedMonthsCount: count,
+    hasSufficientHistory: count >= 2,
+    explanationLabel: `ממוצע אישי מבוסס על ${count} חודשים היסטוריים מלאים`,
   };
 }
 
@@ -133,7 +361,6 @@ const HEBREW_MONTH_NAMES = [
 ];
 
 export function formatMonthKeyLabel(monthKey: string): string {
-  // monthKey is YYYY-MM
   const parts = monthKey.split('-');
   if (parts.length < 2) return monthKey;
   const year = parts[0];
@@ -142,20 +369,31 @@ export function formatMonthKeyLabel(monthKey: string): string {
   return `${monthName} ${year}`;
 }
 
-export function getCashFlowHistory(transactions: Transaction[], maxMonths: number = 6): MonthDataPoint[] {
-  // CRITICAL: Calculate ONLY from real stored transactions. Zero mocks.
+/**
+ * Historical Cash Flow Trend (Multi-Month Graph)
+ * 
+ * CRITICAL: Strictly bounded to real historical months <= CURRENT_APP_MONTH.
+ * Never includes future months (like December 2026) in historical charts.
+ */
+export function getCashFlowHistory(
+  transactions: Transaction[],
+  maxMonths: number = 8
+): MonthDataPoint[] {
   const valid = transactions.filter((t) => !t.isInternalTransfer && t.type !== 'transfer');
   if (valid.length === 0) return [];
 
-  // Group by real transaction month (YYYY-MM from Transaction.date)
+  // Group by real transaction month (YYYY-MM), bounded <= CURRENT_APP_MONTH
   const monthMap = new Map<string, { income: number; expense: number }>();
 
   for (const t of valid) {
     if (!t.date || t.date.length < 7) continue;
-    const monthKey = t.date.substring(0, 7); // e.g. "2026-09"
+    const monthKey = t.date.substring(0, 7);
+    // Future date protection: exclude any future month from historical cash flow graph
+    if (monthKey > CURRENT_APP_MONTH) continue;
+
     const curr = monthMap.get(monthKey) || { income: 0, expense: 0 };
 
-    if (t.type === 'income') {
+    if (txIsIncome(t)) {
       curr.income += t.amount;
     } else if (t.type === 'refund') {
       curr.expense -= Math.abs(t.amount);
@@ -166,9 +404,8 @@ export function getCashFlowHistory(transactions: Transaction[], maxMonths: numbe
     monthMap.set(monthKey, curr);
   }
 
-  // Sort chronologically ascending for the chart
+  // Sort chronologically ascending
   const sortedMonthKeys = Array.from(monthMap.keys()).sort((a, b) => a.localeCompare(b));
-  // Take up to maxMonths recent months
   const recentKeys = sortedMonthKeys.slice(-maxMonths);
 
   const points: MonthDataPoint[] = [];
@@ -188,6 +425,10 @@ export function getCashFlowHistory(transactions: Transaction[], maxMonths: numbe
   }
 
   return points;
+}
+
+function txIsIncome(t: Transaction): boolean {
+  return t.type === 'income';
 }
 
 // -------------------------------------------------------------
@@ -343,40 +584,10 @@ export function getTransactionCyclePeriod(dateStr: string, startDay: number): {
 }
 
 
-export function getCategoryBreakdown(transactions: Transaction[]): CategorySummary[] {
-  // Filter out internal transfers and income
-  const expenseTransactions = transactions.filter(
-    t => !t.isInternalTransfer && (t.type === 'expense' || t.type === 'loan_payment')
-  );
-
-  const categoryMap = new Map<string, { amount: number; count: number; items: Transaction[] }>();
-
-  let totalExpense = 0;
-  for (const tx of expenseTransactions) {
-    totalExpense += tx.amount;
-    const cat = tx.category || 'אחר';
-    const curr = categoryMap.get(cat) || { amount: 0, count: 0, items: [] };
-    curr.amount += tx.amount;
-    curr.count += 1;
-    curr.items.push(tx);
-    categoryMap.set(cat, curr);
-  }
-
-  const summaries: CategorySummary[] = [];
-  categoryMap.forEach((val, cat) => {
-    const percentage = totalExpense > 0 ? Math.round((val.amount / totalExpense) * 100) : 0;
-    summaries.push({
-      category: cat,
-      amount: val.amount,
-      percentage,
-      count: val.count,
-      transactions: val.items,
-      color: getCategoryColor(cat),
-    });
-  });
-
-  // Sort descending by amount
-  return summaries.sort((a, b) => b.amount - a.amount);
+export function getCategoryBreakdown(transactions: Transaction[], targetMonthKey?: string): CategorySummary[] {
+  // Uses central period cash flow calculation to ensure exact consistency and refund deductions
+  const period = calculateCashFlowForPeriod(transactions, targetMonthKey);
+  return period.categoryBreakdown;
 }
 
 // SIMULATION: Compound Interest & Growth

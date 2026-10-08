@@ -4,9 +4,16 @@ import { MonthDataPoint } from '../../services/financialCalculations';
 interface CashFlowChartProps {
   data: MonthDataPoint[];
   onMonthClick?: (month: MonthDataPoint) => void;
+  personalAverageExpense?: number;
+  budgetTargetExpense?: number;
 }
 
-export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick }) => {
+export const CashFlowChart: React.FC<CashFlowChartProps> = ({
+  data,
+  onMonthClick,
+  personalAverageExpense,
+  budgetTargetExpense,
+}) => {
   const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
   const [period, setPeriod] = useState<'6m' | '12m'>('6m');
 
@@ -23,22 +30,30 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
     );
   }
 
+  // Slice data based on selected period
+  const displayData = period === '6m' ? data.slice(-6) : data.slice(-12);
+
   // SVG dimensions
   const width = 680;
-  const height = 240;
+  const height = 250;
   const paddingX = 45;
   const paddingTop = 25;
-  const paddingBottom = 40;
+  const paddingBottom = 45;
 
   const chartWidth = width - paddingX * 2;
   const chartHeight = height - paddingTop - paddingBottom;
 
-  const maxVal =
-    Math.max(...data.map((d) => Math.max(d.income, d.expense, d.savings)), 28000) * 1.1;
+  const allValues = [
+    ...displayData.map((d) => Math.max(d.income, d.expense, d.savings)),
+    personalAverageExpense || 0,
+    budgetTargetExpense || 0,
+    25000,
+  ];
+  const maxVal = Math.max(...allValues) * 1.12;
 
   const getX = (index: number) => {
-    if (data.length <= 1) return paddingX;
-    return paddingX + (index / (data.length - 1)) * chartWidth;
+    if (displayData.length <= 1) return paddingX + chartWidth / 2;
+    return paddingX + (index / (displayData.length - 1)) * chartWidth;
   };
 
   const getY = (val: number) => {
@@ -46,14 +61,14 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
   };
 
   const createLinePath = (getter: (d: MonthDataPoint) => number) => {
-    return data
+    return displayData
       .map((d, i) => `${i === 0 ? 'M' : 'L'} ${getX(i)} ${getY(getter(d))}`)
       .join(' ');
   };
 
   const createAreaPath = (getter: (d: MonthDataPoint) => number) => {
     const line = createLinePath(getter);
-    const lastX = getX(data.length - 1);
+    const lastX = getX(displayData.length - 1);
     const firstX = getX(0);
     const bottomY = getY(0);
     return `${line} L ${lastX} ${bottomY} L ${firstX} ${bottomY} Z`;
@@ -71,9 +86,9 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
           </p>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           {/* Legend */}
-          <div className="flex items-center gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-3 text-xs">
             <div className="flex items-center gap-1.5">
               <span className="w-2.5 h-2.5 rounded-full bg-[#059669] inline-block"></span>
               <span className="text-slate-600 dark:text-slate-300 font-medium">הכנסה</span>
@@ -86,6 +101,18 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
               <span className="w-2.5 h-2.5 rounded-full bg-slate-500 dark:bg-slate-400 inline-block"></span>
               <span className="text-slate-600 dark:text-slate-300 font-medium">חיסכון</span>
             </div>
+            {Boolean(personalAverageExpense && personalAverageExpense > 0) && (
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 border-t border-dashed border-amber-500 inline-block"></span>
+                <span className="text-amber-700 dark:text-amber-400 text-[11px] font-medium">ממוצע אישי</span>
+              </div>
+            )}
+            {Boolean(budgetTargetExpense && budgetTargetExpense > 0) && (
+              <div className="flex items-center gap-1.5">
+                <span className="w-3 h-0.5 border-t border-dotted border-indigo-500 inline-block"></span>
+                <span className="text-indigo-700 dark:text-indigo-400 text-[11px] font-medium">תקציב יעד</span>
+              </div>
+            )}
           </div>
 
           <div className="flex rounded-lg border border-slate-200 dark:border-[#1F2937] bg-slate-100 dark:bg-[#0B0F17] p-0.5 text-xs">
@@ -107,7 +134,7 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
                   : 'text-slate-500 dark:text-slate-400 hover:text-slate-900 dark:hover:text-slate-200'
               }`}
             >
-              12 חודשים
+              כל ההיסטוריה
             </button>
           </div>
         </div>
@@ -156,6 +183,52 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
             );
           })}
 
+          {/* Reference Line: Personal Average Expense */}
+          {Boolean(personalAverageExpense && personalAverageExpense > 0) && (
+            <g>
+              <line
+                x1={paddingX}
+                y1={getY(personalAverageExpense!)}
+                x2={width - paddingX}
+                y2={getY(personalAverageExpense!)}
+                stroke="#F59E0B"
+                strokeWidth="1.5"
+                strokeDasharray="5 4"
+              />
+              <text
+                x={width - paddingX}
+                y={getY(personalAverageExpense!) - 5}
+                className="fill-amber-600 dark:fill-amber-400 font-mono text-[10px]"
+                textAnchor="end"
+              >
+                ממוצע אישי: ₪{personalAverageExpense!.toLocaleString()}
+              </text>
+            </g>
+          )}
+
+          {/* Reference Line: Budget Target */}
+          {Boolean(budgetTargetExpense && budgetTargetExpense > 0) && (
+            <g>
+              <line
+                x1={paddingX}
+                y1={getY(budgetTargetExpense!)}
+                x2={width - paddingX}
+                y2={getY(budgetTargetExpense!)}
+                stroke="#6366F1"
+                strokeWidth="1.5"
+                strokeDasharray="2 3"
+              />
+              <text
+                x={paddingX + 6}
+                y={getY(budgetTargetExpense!) - 5}
+                className="fill-indigo-600 dark:fill-indigo-400 font-mono text-[10px]"
+                textAnchor="start"
+              >
+                תקציב יעד: ₪{budgetTargetExpense!.toLocaleString()}
+              </text>
+            </g>
+          )}
+
           {/* Area Fills */}
           <path d={createAreaPath((d) => d.income)} fill="url(#incomeGrad)" />
           <path d={createAreaPath((d) => d.expense)} fill="url(#expenseGrad)" />
@@ -185,7 +258,7 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
           />
 
           {/* Data Points and Interaction Circles */}
-          {data.map((d, i) => {
+          {displayData.map((d, i) => {
             const x = getX(i);
             const isHovered = hoveredIdx === i;
             return (
@@ -251,23 +324,23 @@ export const CashFlowChart: React.FC<CashFlowChartProps> = ({ data, onMonthClick
         </svg>
 
         {/* Hover Tooltip Box */}
-        {hoveredIdx !== null && data[hoveredIdx] && (
+        {hoveredIdx !== null && displayData[hoveredIdx] && (
           <div className="absolute top-2 left-6 bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-3 shadow-md pointer-events-none z-20 min-w-[170px]">
             <div className="text-xs font-bold text-slate-900 dark:text-white border-b border-slate-100 dark:border-[#1F2937] pb-1 mb-2">
-              {data[hoveredIdx].monthLabel} 2026
+              {displayData[hoveredIdx].monthLabel}
             </div>
             <div className="space-y-1 text-xs font-mono">
               <div className="flex justify-between items-center text-[#059669] dark:text-emerald-400">
-                <span className="font-sans text-slate-500 dark:text-slate-400">הכנסה:</span>
-                <span>₪{data[hoveredIdx].income.toLocaleString()}</span>
+                <span>הכנסה:</span>
+                <span className="font-bold">₪{displayData[hoveredIdx].income.toLocaleString()}</span>
               </div>
               <div className="flex justify-between items-center text-[#BE123C] dark:text-rose-400">
-                <span className="font-sans text-slate-500 dark:text-slate-400">הוצאות:</span>
-                <span>₪{data[hoveredIdx].expense.toLocaleString()}</span>
+                <span>הוצאה:</span>
+                <span className="font-bold">₪{displayData[hoveredIdx].expense.toLocaleString()}</span>
               </div>
-              <div className="flex justify-between items-center text-slate-900 dark:text-white pt-1 border-t border-slate-100 dark:border-[#1F2937] font-semibold">
-                <span className="font-sans text-slate-500 dark:text-slate-400">חיסכון נטו:</span>
-                <span>₪{data[hoveredIdx].savings.toLocaleString()}</span>
+              <div className="flex justify-between items-center text-slate-600 dark:text-slate-300">
+                <span>חיסכון נטו:</span>
+                <span className="font-bold">₪{displayData[hoveredIdx].savings.toLocaleString()}</span>
               </div>
             </div>
           </div>

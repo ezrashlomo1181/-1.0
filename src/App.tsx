@@ -29,6 +29,7 @@ import {
   FinancialCycleConfig,
 } from './types/financial';
 import { deduplicateTransactions, parseFinancialDocument } from './services/documentParser';
+import { reconcileCrossDocumentTransactions } from './services/reconciliationEngine';
 import { Sidebar, NavSection } from './components/Sidebar';
 import { Header } from './components/Header';
 import { VerificationModal } from './components/VerificationModal';
@@ -327,8 +328,9 @@ export default function App() {
       const baseTxs = updatedExistingTxs || prev.transactions;
       const combinedTxs = [...uniqueTxs, ...baseTxs];
 
-      // Maintain descending chronological order (newest date on top)
-      combinedTxs.sort((a, b) => b.date.localeCompare(a.date));
+      // 2. Perform cross-document reconciliation (link settlements and detailed transactions)
+      const { reconciledTransactions } = reconcileCrossDocumentTransactions(combinedTxs);
+      reconciledTransactions.sort((a, b) => b.date.localeCompare(a.date));
 
       const newDoc: UploadedDocument = {
         id: `doc-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,

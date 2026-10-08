@@ -9,7 +9,7 @@ import { createRequire } from 'module';
 dotenv.config();
 
 const require = createRequire(import.meta.url);
-const pdfParse = require('pdf-parse');
+const { PDFParse } = require('pdf-parse');
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -27,7 +27,16 @@ app.use(express.json({ limit: '15mb' }));
 
 // AI Helper with @google/genai
 const apiKey = process.env.GEMINI_API_KEY || '';
-const ai = apiKey ? new GoogleGenAI({ apiKey }) : null;
+const ai = apiKey
+  ? new GoogleGenAI({
+      apiKey,
+      httpOptions: {
+        headers: {
+          'User-Agent': 'aistudio-build',
+        },
+      },
+    })
+  : null;
 
 // Endpoint: Ask My Finances (שאל את הכספים שלי)
 app.post('/api/ai/ask', async (req, res) => {
@@ -131,19 +140,21 @@ app.post('/api/ai/parse-document', async (req, res) => {
     let isVisualDocument = false;
     let visualMimeType = 'application/pdf';
 
-    // 1. If PDF base64 is provided, attempt text extraction using pdf-parse
+    // 1. If PDF base64 is provided, attempt text extraction using PDFParse v2
     if (fileBase64 && (fileType === 'pdf' || fileName.toLowerCase().endsWith('.pdf'))) {
       try {
         const pdfBuffer = Buffer.from(fileBase64, 'base64');
-        const pdfData = await pdfParse(pdfBuffer);
-        extractedText = pdfData.text || '';
+        const parser = new PDFParse({ data: new Uint8Array(pdfBuffer) });
+        const textResult = await parser.getText();
+        extractedText = textResult?.text || '';
+        await parser.destroy();
       } catch (pdfErr) {
-        console.warn('pdf-parse failed, will attempt multimodal visual inspection:', pdfErr);
+        console.warn('pdf-parse v2 failed, will attempt multimodal visual inspection:', pdfErr);
         isVisualDocument = true;
         visualMimeType = 'application/pdf';
       }
 
-      // If text from pdf-parse is suspiciously short or empty (scanned PDF)
+      // If text from pdf-parse is suspiciously short or empty (scanned / image-only PDF)
       if (!extractedText || extractedText.trim().length < 40) {
         isVisualDocument = true;
         visualMimeType = 'application/pdf';
@@ -177,6 +188,207 @@ app.post('/api/ai/parse-document', async (req, res) => {
     else if (textLower.includes('יהב')) detectedInstitution = 'בנק יהב';
     else if (textLower.includes('בינלאומי')) detectedInstitution = 'הבנק הבינלאומי';
 
+    // Helper: validate and sanitize transaction semantics (Hierarchy + prevent impossible combinations)
+    const sanitizeExtractedTransaction = (item: any) => {
+      const merchant = String(item.merchant || item.description || 'עסקה ללא שם').trim();
+      const desc = String(item.description || merchant).trim();
+      let category = String(item.category || 'כללי').trim();
+      let type = String(item.type || 'expense').toLowerCase();
+      let isInternalTransfer = Boolean(item.isInternalTransfer);
+      let needsReview = Boolean(item.needsReview);
+      let reviewReason = item.reviewReason || '';
+
+      const combined = `${merchant} ${desc}`.toLowerCase();
+
+      // Check ATM (Always expense, never transfer!)
+      if (
+        combined.includes('כספומט') ||
+        combined.includes('בנקומט') ||
+        combined.includes('משיכת מזומן') ||
+        combined.includes('משיכה במכשיר')
+      ) {
+        type = 'expense';
+        category = 'משיכת מזומן';
+        isInternalTransfer = false;
+      }
+      // Check Credit Card Settlement (Do NOT prematurely mark as internal transfer if card detailed statement isn't imported)
+      else if (
+        combined.includes('חיוב כרטיס') ||
+        combined.includes('פירעון כרטיס') ||
+        combined.includes('חיוב ויזה') ||
+        combined.includes('חיוב ישראכרט') ||
+        combined.includes('חיוב כאל') ||
+        combined.includes('חיוב מקס') ||
+        combined.includes('חיוב מאסטרקארד') ||
+        combined.includes('הוראת קבע כרטיס אשראי')
+      ) {
+        type = 'expense';
+        category = 'חיוב כרטיס אשראי (ללא פירוט)';
+        isInternalTransfer = false;
+        needsReview = true;
+        reviewReason = 'חיוב כרטיס אשראי מרוכז בחשבון העו"ש – נספר כהוצאה כוללת עד לייבוא פירוט כרטיס האשראי';
+      }
+      // Check Inter-account transfers
+      else if (
+        combined.includes('העברה בין חשבונות') ||
+        combined.includes('העברה עצמית') ||
+        combined.includes('העברה לחשבון') ||
+        combined.includes('העברה לחיסכון') ||
+        combined.includes('הפקדה לפיקדון')
+      ) {
+        type = 'transfer';
+        category = 'העברות ומזומן';
+        isInternalTransfer = true;
+      }
+      // Check consumer refunds / merchant credits
+      else if (
+        type === 'refund' ||
+        (combined.includes('זיכוי') && !combined.includes('זיכוי שכר')) ||
+        combined.includes('החזר כספי') ||
+        combined.includes('ביטול עסקה') ||
+        combined.includes('refund') ||
+        combined.includes('reversal')
+      ) {
+        type = 'refund';
+        if (category === 'כללי' || category === 'משכורת והכנסות') {
+          category = 'החזרים וזיכויים';
+        }
+      }
+      // Check true income (salary, allowance, dividend, interest)
+      else if (
+        combined.includes('משכורת') ||
+        combined.includes('שכר עבודה') ||
+        combined.includes('העברת שכר') ||
+        combined.includes('זיכוי שכר') ||
+        combined.includes('ביטוח לאומי') ||
+        combined.includes('קצבת ילדים') ||
+        combined.includes('קצבת זקנה') ||
+        combined.includes('דמי לידה') ||
+        combined.includes('דמי אבטלה') ||
+        combined.includes('דיבידנד') ||
+        combined.includes('ריבית זכות') ||
+        combined.includes('החזר מס')
+      ) {
+        type = 'income';
+        category = 'משכורת והכנסות';
+      }
+
+      // IMPOSSIBLE COMBINATIONS VALIDATION:
+      // An income transaction with consumer retail/food/health categories MUST NOT exist!
+      const consumerExpenseCategories = [
+        'קניות וביגוד',
+        'ביגוד',
+        'קניות',
+        'מזון וסופר',
+        'סופרמרקט',
+        'מסעדות ובילויים',
+        'מסעדות ומשלוחים',
+        'בריאות ופארם',
+        'פארם',
+        'תחבורה ורכב',
+      ];
+
+      if (type === 'income' && consumerExpenseCategories.some((c) => category.includes(c))) {
+        // If it was marked as income with clothing/supermarket/restaurant, it is a REFUND!
+        type = 'refund';
+        needsReview = true;
+        reviewReason = 'זוהה זיכוי מבית עסק קמעונאי/צרכני – סווג כהחזר המקטין הוצאה (ולא כהכנסה)';
+      }
+
+      return {
+        date: item.date,
+        billingDate: item.billingDate || undefined,
+        merchant,
+        description: desc,
+        amount: Math.abs(Number(item.amount) || 0),
+        type,
+        category,
+        currency: item.currency || 'ILS',
+        isRecurring: Boolean(item.isRecurring),
+        isInternalTransfer,
+        needsReview,
+        reviewReason,
+        confidenceScore: item.confidenceScore || 0.9,
+      };
+    };
+
+    // Helper: Local deterministic extraction from digital text
+    const extractLocalTransactionsFromText = (text: string) => {
+      const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+      const results: any[] = [];
+      const dateRegex = /\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](\d{2,4})\b/;
+      const amountRegex = /\b-?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})\b|\b-?\d+\.\d{2}\b/;
+
+      for (const line of lines) {
+        // Skip header / summary lines
+        if (
+          line.includes('סה"כ') ||
+          line.includes('סך הכל') ||
+          line.includes('יתרה לתשלום') ||
+          line.includes('יתרה קודמת') ||
+          line.includes('דף מספר')
+        ) {
+          continue;
+        }
+
+        const dateMatch = line.match(dateRegex);
+        const amountMatch = line.match(amountRegex);
+
+        if (dateMatch && amountMatch) {
+          const d = dateMatch[1].padStart(2, '0');
+          const m = dateMatch[2].padStart(2, '0');
+          let y = parseInt(dateMatch[3], 10);
+          if (y < 50) y += 2000;
+          else if (y < 100) y += 1900;
+          const normalizedDate = `${y}-${m}-${d}`;
+
+          const rawAmountStr = amountMatch[0].replace(/,/g, '');
+          const numAmount = Math.abs(parseFloat(rawAmountStr));
+          if (isNaN(numAmount) || numAmount === 0) continue;
+
+          let merchant = line
+            .replace(dateMatch[0], '')
+            .replace(amountMatch[0], '')
+            .replace(/[₪$€,\-]/g, '')
+            .trim();
+
+          if (merchant.length < 2) merchant = 'עסקה ללא שם';
+
+          const sanitized = sanitizeExtractedTransaction({
+            date: normalizedDate,
+            merchant,
+            description: merchant,
+            amount: numAmount,
+            type: line.includes('זיכוי') ? 'refund' : 'expense',
+            category: 'כללי',
+            confidenceScore: 0.88,
+          });
+
+          results.push(sanitized);
+        }
+      }
+
+      return results;
+    };
+
+    // 2. REQUIREMENT: If the PDF contains usable digital text, parse it locally first and do NOT send to Gemini unnecessarily!
+    if (!isVisualDocument && extractedText && extractedText.trim().length >= 40) {
+      const localTxs = extractLocalTransactionsFromText(extractedText);
+      if (localTxs.length > 0) {
+        return res.json({
+          success: true,
+          fileName,
+          detectedInstitution,
+          extractedTransactions: localTxs,
+          extractedTransactionsCount: localTxs.length,
+          processingMethod: 'פענוח שכבת טקסט מקומי (Digital Text Layer)',
+          isVisualDocument: false,
+          message: `חולצו ${localTxs.length} עסקאות אמיתיות ישירות משכבת הטקסט הדיגיטלית של ${fileName}.`,
+        });
+      }
+    }
+
+    // 3. Fallback or Visual (Scanned PDF / Images): Multimodal OCR with Gemini
     const extractionPrompt = `
 אתה מפענח מסמכים ותדפיסים בנקאיים וכרטיסי אשראי ישראליים מקצועי.
 תפקידך לחלץ אך ורק את העסקאות הפיננסיות האמיתיות הקיימות במסמך.
@@ -188,10 +400,11 @@ app.post('/api/ai/parse-document', async (req, res) => {
 4. סכום חייב להיות מספר חיובי (למשל 120.50).
 5. סיווג מדויק ושמרני של סוגי העסקאות (type):
    - משיכת מזומן / כספומט / בנקומט מסווגת כ-expense (הוצאה / משיכת מזומן), ולא כ-transfer!
-   - פירעון כרטיס אשראי / חיוב חודשי כרטיס אשראי בחשבון העו"ש (כגון "חיוב כרטיס", "חיוב ויזה", "חיוב ישראכרט") יסווג כ-transfer עם isInternalTransfer: true, כדי למנוע ספירה כפולה אם נטענו עסקאות הכרטיס.
+   - פירעון כרטיס אשראי / חיוב חודשי כרטיס אשראי בחשבון העו"ש יסווג כ-transfer עם isInternalTransfer: true, כדי למנוע ספירה כפולה אם נטענו עסקאות הכרטיס.
    - העברות בין חשבונות המשתמש / העברה עצמית יסווגו כ-transfer עם isInternalTransfer: true.
-   - זיכויים, החזרים כספיים וביטולי עסקאות יסווגו כ-refund (החזר המקטין הוצאה, ולא כהכנסה!).
-   - הכנסות אמיתיות: משכורת, שכר, הפקדת צ'ק/מזומן, קצבה, ביטוח לאומי, דיבידנד, ריבית זכות יסווגו כ-income.
+   - זיכויים, החזרים כספיים וביטולי עסקאות מול בתי עסק (בגדים, מסעדות, סופר, פארם) יסווגו כ-refund (החזר המקטין הוצאה, ולא כהכנסה!).
+   - עסקאות זיכוי מחנויות בגדים/קניונים אסור לעולם לסווג כ-income! הן תמיד refund בקטגוריית "קניות וביגוד".
+   - הכנסות אמיתיות בלבד: משכורת, שכר, קצבה, ביטוח לאומי, דיבידנד, ריבית זכות, החזר מס יסווגו כ-income.
    - הוצאות רגילות, קניות, תשלומים יסווגו כ-expense.
    - אם אין מספיק מידע כדי להכריע בוודאות, סמן needsReview: true וציין reviewReason.
 6. סווג לקטגוריה מתאימה בעברית (למשל: "משכורת והכנסות", "מזון וסופר", "מסעדות ובילויים", "תחבורה ורכב", "דיור וחשבונות", "תקשורת וטכנולוגיה", "בריאות ופארם", "קניות וביגוד", "ביטוח ופיננסים", "השקעות וחיסכון", "העברות ומזומן", "כללי").
@@ -218,24 +431,22 @@ app.post('/api/ai/parse-document', async (req, res) => {
 }
 `;
 
-    // 1. If Gemini AI is available, use it for precise extraction
     if (ai) {
       try {
         let contents: any;
 
         if (isVisualDocument && fileBase64) {
-          // Multimodal visual extraction for Scanned PDFs or Images
-          contents = [
-            {
-              inlineData: {
-                mimeType: visualMimeType,
-                data: fileBase64,
-              },
+          // Multimodal visual extraction for Scanned PDFs or Images using { parts: [...] }
+          const imagePart = {
+            inlineData: {
+              mimeType: visualMimeType,
+              data: fileBase64,
             },
-            {
-              text: `${extractionPrompt}\nזהו מסמך סרוק / תמונה חזותית. אנא בצע OCR מדויק על פי הטבלאות והעמודות וחלץ את כל העסקאות.`,
-            },
-          ];
+          };
+          const textPart = {
+            text: `${extractionPrompt}\nזהו מסמך סרוק / תמונה חזותית. אנא בצע OCR מדויק על פי הטבלאות והעמודות וחלץ את כל העסקאות האמיתיות.`,
+          };
+          contents = { parts: [imagePart, textPart] };
         } else {
           // Text-based extraction from PDF text layer
           contents = `${extractionPrompt}\nטקסט המסמך:\n${extractedText.slice(0, 32000)}`;
@@ -253,16 +464,17 @@ app.post('/api/ai/parse-document', async (req, res) => {
         if (respText) {
           const parsed = JSON.parse(respText);
           if (Array.isArray(parsed.extractedTransactions)) {
+            const sanitizedTransactions = parsed.extractedTransactions.map(sanitizeExtractedTransaction);
             return res.json({
-              success: parsed.extractedTransactions.length > 0,
+              success: sanitizedTransactions.length > 0,
               fileName,
               detectedInstitution: parsed.detectedInstitution || detectedInstitution,
-              extractedTransactions: parsed.extractedTransactions,
-              extractedTransactionsCount: parsed.extractedTransactions.length,
-              processingMethod: isVisualDocument ? 'OCR חזותי (Gemini AI)' : 'פענוח שכבת טקסט',
+              extractedTransactions: sanitizedTransactions,
+              extractedTransactionsCount: sanitizedTransactions.length,
+              processingMethod: isVisualDocument ? 'OCR חזותי (Gemini AI)' : 'פענוח שכבת טקסט (Gemini AI)',
               isVisualDocument,
-              message: parsed.extractedTransactions.length > 0
-                ? `חולצו ${parsed.extractedTransactions.length} עסקאות אמיתיות מתוך ${fileName}${isVisualDocument ? ' (באמצעות OCR חזותי)' : ''}.`
+              message: sanitizedTransactions.length > 0
+                ? `חולצו ${sanitizedTransactions.length} עסקאות אמיתיות מתוך ${fileName}${isVisualDocument ? ' (באמצעות OCR חזותי)' : ''}.`
                 : 'לא זוהו עסקאות במסמך זה.',
             });
           }
@@ -277,121 +489,32 @@ app.post('/api/ai/parse-document', async (req, res) => {
       return res.status(422).json({
         success: false,
         extractedTransactions: [],
-        error: 'קובץ ה-PDF סרוק או כתמונה ללא שכבת טקסט דיגיטלית. נדרש חיבור AI עבור פענוח OCR חזותי.',
+        error: 'קובץ ה-PDF הינו סרוק או ללא שכבת טקסט דיגיטלית קריאה. נדרש חיבור AI פעיל לצורך פענוח OCR חזותי.',
       });
     }
 
-    // 2. Deterministic Local Regex / Table Extraction Fallback
-    const lines = extractedText.split(/\r?\n/).map((l: string) => l.trim()).filter(Boolean);
-    const localTransactions: any[] = [];
-
-    // Regex for date: DD/MM/YYYY or DD.MM.YYYY or DD-MM-YYYY or DD/MM/YY
-    const dateRegex = /\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](\d{2,4})\b/;
-    // Regex for amount: 1,234.56 or 1234.56 or 123.00
-    const amountRegex = /\b-?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})\b|\b-?\d+\.\d{2}\b/;
-
-    for (const line of lines) {
-      const dateMatch = line.match(dateRegex);
-      const amountMatch = line.match(amountRegex);
-
-      if (dateMatch && amountMatch) {
-        const d = dateMatch[1].padStart(2, '0');
-        const m = dateMatch[2].padStart(2, '0');
-        let y = parseInt(dateMatch[3], 10);
-        if (y < 50) y += 2000;
-        else if (y < 100) y += 1900;
-        const normalizedDate = `${y}-${m}-${d}`;
-
-        const rawAmountStr = amountMatch[0].replace(/,/g, '');
-        const numAmount = Math.abs(parseFloat(rawAmountStr));
-        if (isNaN(numAmount) || numAmount === 0) continue;
-
-        // Clean merchant name by removing date and amount from line
-        let merchant = line
-          .replace(dateMatch[0], '')
-          .replace(amountMatch[0], '')
-          .replace(/[₪$€,\-]/g, '')
-          .trim();
-
-        if (merchant.length < 2) {
-          merchant = 'עסקה ללא שם';
-        }
-
-        const isIncome =
-          line.includes('זכות') ||
-          line.includes('זיכוי') ||
-          line.includes('משכורת') ||
-          line.includes('הפקדה') ||
-          line.includes('שכר') ||
-          line.includes('העברה מ-') ||
-          line.includes('העברה מחשבון') ||
-          line.includes('תקבול') ||
-          line.includes('קצבה') ||
-          line.includes('דיבידנד') ||
-          line.includes('ביטוח לאומי') ||
-          line.includes('מענק');
-
-        const isAtm = line.includes('כספומט') || line.includes('בנקומט') || line.includes('משיכת מזומן') || line.includes('משיכה במכשיר');
-        const isCreditCardSettlement = line.includes('פירעון כרטיס') || line.includes('חיוב כרטיס') || line.includes('חיוב ויזה') || line.includes('חיוב ישראכרט') || line.includes('חיוב מקס') || line.includes('חיוב מאסטרקארד');
-        const isTransfer = !isAtm && (line.includes('העברה עצמית') || line.includes('בין חשבונות') || line.includes('העברה מחשבון') || line.includes('העברה לחשבון') || isCreditCardSettlement);
-        const isRefund = line.includes('זיכוי') && !line.includes('זיכוי שכר') && !line.includes('שכר');
-
-        let txType: string = 'expense';
-        let txCat = 'כללי';
-        let isInternalTransfer = false;
-
-        if (isCreditCardSettlement) {
-          txType = 'transfer';
-          txCat = 'פירעון כרטיס אשראי';
-          isInternalTransfer = true;
-        } else if (isAtm) {
-          txType = 'expense';
-          txCat = 'משיכת מזומן';
-        } else if (isTransfer) {
-          txType = 'transfer';
-          txCat = 'העברות ומזומן';
-          isInternalTransfer = true;
-        } else if (isRefund) {
-          txType = 'refund';
-          txCat = 'החזרים וזיכויים';
-        } else if (isIncome) {
-          txType = 'income';
-          txCat = 'משכורת והכנסות';
-        }
-
-        localTransactions.push({
-          date: normalizedDate,
-          merchant,
-          description: merchant,
-          amount: numAmount,
-          type: txType,
-          category: txCat,
-          currency: 'ILS',
-          isRecurring: false,
-          isInternalTransfer,
-          confidenceScore: 0.85,
-        });
-      }
-    }
-
-    if (localTransactions.length === 0) {
+    // 4. Deterministic Local Regex Fallback if Gemini failed on digital text
+    const localFallbackTxs = extractLocalTransactionsFromText(extractedText);
+    if (localFallbackTxs.length > 0) {
       return res.json({
-        success: false,
+        success: true,
         fileName,
         detectedInstitution,
-        extractedTransactions: [],
-        extractedTransactionsCount: 0,
-        message: 'לא זוהו עסקאות במסמך זה.',
+        extractedTransactions: localFallbackTxs,
+        extractedTransactionsCount: localFallbackTxs.length,
+        processingMethod: 'פענוח מקומי דטרמיניסטי',
+        isVisualDocument: false,
+        message: `חולצו ${localFallbackTxs.length} עסקאות מתוך ${fileName}.`,
       });
     }
 
     return res.json({
-      success: true,
+      success: false,
       fileName,
       detectedInstitution,
-      extractedTransactions: localTransactions,
-      extractedTransactionsCount: localTransactions.length,
-      message: `חולצו ${localTransactions.length} עסקאות מתוך ${fileName}.`,
+      extractedTransactions: [],
+      extractedTransactionsCount: 0,
+      message: 'לא זוהו עסקאות במסמך זה.',
     });
   } catch (error) {
     console.error('Doc parse error:', error);

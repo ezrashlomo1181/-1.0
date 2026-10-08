@@ -2,6 +2,14 @@ import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
 import { Transaction, TransactionType, ConfidenceLevel, LearnedRule } from '../types/financial';
 import { getStoredLearnedRules } from './storage';
+import {
+  classifyTransactionSemantics,
+  validateAndFixTransactionCombination,
+} from './classificationEngine';
+import {
+  identifyDocumentRole,
+  reconcileCrossDocumentTransactions,
+} from './reconciliationEngine';
 
 export interface ParseResult {
   success: boolean;
@@ -271,7 +279,11 @@ export function categorizeMerchant(
     };
   }
 
-  // 3. Credit Card Settlement Check (Internal transfer to prevent double counting with card statement)
+  // 3. Credit Card Settlement Check
+  // IMPORTANT: Do NOT automatically treat as internal transfer!
+  // If detailed card transactions do not exist, this spending must NOT disappear from financial analysis.
+  // It starts as an expense with needsReview=true.
+  // Cross-document reconciliation will only convert it to an internal transfer if detailed card transactions exist and match.
   if (
     combined.includes('חיוב כרטיס') ||
     combined.includes('פירעון כרטיס') ||
@@ -285,11 +297,13 @@ export function categorizeMerchant(
     combined.includes('חיוב ח-ן כרטיס')
   ) {
     return {
-      category: 'פירעון כרטיס אשראי',
-      type: 'transfer',
-      confidenceScore: 0.96,
-      isInternalTransfer: true,
-      needsReview: false,
+      category: 'חיוב כרטיס אשראי (ללא פירוט)',
+      type: 'expense',
+      confidenceScore: 0.85,
+      isInternalTransfer: false,
+      needsReview: true,
+      reviewReason:
+        'חיוב כרטיס אשראי מרוכז בחשבון העו"ש – נספר כהוצאה כוללת עד לייבוא קובץ פירוט כרטיס האשראי.',
     };
   }
 
@@ -490,6 +504,25 @@ export function normalizeDate(raw: any): string | null {
     let y = parseInt(dmyShortMatch[3], 10);
     y = y < 50 ? 2000 + y : 1900 + y;
     return `${y}-${m}-${d}`;
+  }
+
+  // Regex MM/DD/YYYY (US format where day > 12)
+  const mdyMatch = cleanStr.match(/^(0?[1-9]|1[0-2])[-/.]([12]\d|3[01])[-/.](\d{4})$/);
+  if (mdyMatch) {
+    const m = mdyMatch[1].padStart(2, '0');
+    const d = mdyMatch[2].padStart(2, '0');
+    const y = mdyMatch[3];
+    return `${y}-${m}-${d}`;
+  }
+
+  // Regex Month-Year MM/YY or MM.YY or MM/YYYY (e.g. "12.25", "10.25", "02/26")
+  const myMatch = cleanStr.match(/^(0?[1-9]|1[0-2])[-/.](20\d{2}|\d{2})$/);
+  if (myMatch) {
+    const m = myMatch[1].padStart(2, '0');
+    let y = parseInt(myMatch[2], 10);
+    if (y < 50) y += 2000;
+    else if (y < 100) y += 1900;
+    return `${y}-${m}-01`;
   }
 
   // Compact 8-digit date: YYYYMMDD
@@ -731,41 +764,36 @@ function buildTransactionObject(params: {
     sourceFileName,
   } = params;
 
-  const classification = categorizeMerchant(merchant, description || rawCategory);
+  const isCreditCardSource =
+    institutionInfo.defaultPayment === 'credit_card' ||
+    Boolean(institutionInfo.isCreditCardOnly) ||
+    sourceFileName.toLowerCase().includes('אשראי') ||
+    sourceFileName.toLowerCase().includes('כרטיס');
 
-  let txType: TransactionType = classification.type;
-  let isInternalTransfer = Boolean(classification.isInternalTransfer);
+  // 1. Central Semantic Classification Engine
+  const classification = classifyTransactionSemantics({
+    merchant,
+    description: description || rawCategory,
+    rawCategory,
+    isCreditRow,
+    isDebitRow,
+    amountIsNegative,
+    isCreditCardSource,
+  });
 
-  if (amountIsNegative) {
-    // In credit card, negative amount is a refund; in bank account, negative is usually debit/expense
-    if (institutionInfo.defaultPayment === 'credit_card' || classification.type === 'refund') {
-      txType = 'refund';
-    } else {
-      txType = 'expense';
-    }
-  } else if (isCreditRow) {
-    // Row is in a credit/deposit column
-    if (classification.type === 'refund' || merchant.includes('זיכוי')) {
-      txType = 'refund';
-    } else if (classification.type === 'transfer' && isInternalTransfer) {
-      txType = 'transfer';
-    } else {
-      txType = 'income';
-    }
-  } else if (isDebitRow) {
-    // Row is in a debit column
-    if (classification.type === 'transfer' && isInternalTransfer) {
-      txType = 'transfer';
-    } else {
-      txType = 'expense';
-    }
-  }
+  // 2. Prevent impossible combinations (e.g. Income + Clothing, Income + Supermarket)
+  const validated = validateAndFixTransactionCombination({
+    merchant,
+    category: rawCategory || classification.category,
+    type: classification.type,
+  });
 
-  let finalCategory = rawCategory || classification.category;
-  if (txType === 'income' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי')) {
-    finalCategory = 'משכורת והכנסות';
-  } else if (txType === 'refund' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי')) {
+  const finalType = validated.type;
+  let finalCategory = validated.category;
+  if (finalType === 'refund' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי')) {
     finalCategory = 'החזרים וזיכויים';
+  } else if (finalType === 'income' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי')) {
+    finalCategory = 'משכורת והכנסות';
   }
 
   const confidenceLevel: ConfidenceLevel = classification.isUserRule
@@ -774,9 +802,23 @@ function buildTransactionObject(params: {
     ? 'high'
     : 'medium';
 
+  const needsReview = classification.needsReview || validated.needsReview;
+  const reviewReason = validated.reviewReason || classification.reviewReason;
+
+  const docRole = identifyDocumentRole({
+    sourceDocument: sourceFileName,
+    accountName: institutionInfo.accountName,
+    description,
+    paymentMethod: institutionInfo.defaultPayment,
+  } as any);
+
+  // Future-date detection relative to current system date (October 8, 2026)
+  const isFuture = Boolean(date && date > '2026-10-08');
+
   return {
     id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
     date,
+    originalDate: date,
     billingDate: billingDate || undefined,
     amount: Math.round(amount * 100) / 100,
     currency: 'ILS',
@@ -786,15 +828,17 @@ function buildTransactionObject(params: {
     accountName: institutionInfo.accountName,
     paymentMethod: institutionInfo.defaultPayment,
     category: finalCategory,
-    type: txType,
+    type: finalType,
     isRecurring: false,
-    isInternalTransfer,
+    isInternalTransfer: classification.isInternalTransfer,
     confidenceScore: classification.confidenceScore,
     confidenceLevel,
-    needsReview: classification.needsReview || (confidenceLevel === 'medium' && !classification.isUserRule),
-    reviewReason: classification.reviewReason,
+    needsReview,
+    reviewReason,
     userConfirmed: confidenceLevel === 'high' || Boolean(classification.isUserRule),
     sourceDocument: sourceFileName,
+    sourceDocumentType: docRole,
+    isFuture,
   };
 }
 
@@ -2369,25 +2413,27 @@ export async function parseFinancialDocument(file: File): Promise<ParseResult> {
 }
 
 // -------------------------------------------------------------
-// 15. CONSERVATIVE DEDUPLICATION
+// 15. CONSERVATIVE DEDUPLICATION & PROVENANCE PRESERVATION
 // -------------------------------------------------------------
 export function deduplicateTransactions(
   existingTxs: Transaction[],
   newTxs: Transaction[]
 ): { uniqueTxs: Transaction[]; duplicatesCount: number; updatedExistingTxs?: Transaction[] } {
-  const cleanMerchant = (m: string) =>
+  const normalizeMerchant = (m: string) =>
     (m || '')
       .toLowerCase()
-      .replace(/["'״׳\-–_.,()/]/g, ' ')
+      .replace(/(\*\*\*\d+|\d{4}$|כרטיס\s*\d+|סניף\s*\d+|בע"?מ|ltd|inc)/gi, '')
+      .replace(/["'״׳\-–_.,()/\\:;#]/g, ' ')
       .replace(/\s+/g, ' ')
       .trim();
 
   // Index existing transactions
   const strongMap = new Map<string, Transaction>();
   const dateAmountMap = new Map<string, Transaction[]>();
+  const billingAmountMap = new Map<string, Transaction[]>();
 
   for (const t of existingTxs) {
-    const normM = cleanMerchant(t.merchant);
+    const normM = normalizeMerchant(t.merchant);
     const amtStr = t.amount.toFixed(2);
     const key = `${t.date}_${amtStr}_${normM}`;
     strongMap.set(key, t);
@@ -2397,44 +2443,63 @@ export function deduplicateTransactions(
       dateAmountMap.set(daKey, []);
     }
     dateAmountMap.get(daKey)!.push(t);
+
+    if (t.billingDate) {
+      const bKey = `${t.billingDate}_${amtStr}`;
+      if (!billingAmountMap.has(bKey)) {
+        billingAmountMap.set(bKey, []);
+      }
+      billingAmountMap.get(bKey)!.push(t);
+    }
   }
 
   const uniqueTxs: Transaction[] = [];
   let duplicatesCount = 0;
 
   for (const t of newTxs) {
-    const normM = cleanMerchant(t.merchant);
+    const normM = normalizeMerchant(t.merchant);
     const amtStr = t.amount.toFixed(2);
     const strongKey = `${t.date}_${amtStr}_${normM}`;
 
-    // 1. Direct strong match (identical date + amount + merchant)
-    if (strongMap.has(strongKey)) {
+    // Helper: merge metadata into canonical record
+    const mergeIntoCanonical = (target: Transaction, source: Transaction) => {
       duplicatesCount++;
-      const existing = strongMap.get(strongKey)!;
-      // Record additional source document
-      if (t.sourceDocument && t.sourceDocument !== existing.sourceDocument) {
-        if (!existing.additionalSources) existing.additionalSources = [];
-        if (!existing.additionalSources.includes(t.sourceDocument)) {
-          existing.additionalSources.push(t.sourceDocument);
+      if (source.sourceDocument && source.sourceDocument !== target.sourceDocument) {
+        if (!target.additionalSources) target.additionalSources = [];
+        if (!target.additionalSources.includes(source.sourceDocument)) {
+          target.additionalSources.push(source.sourceDocument);
         }
       }
-      if (t.billingDate && !existing.billingDate) {
-        existing.billingDate = t.billingDate;
+      if (source.billingDate && !target.billingDate) {
+        target.billingDate = source.billingDate;
       }
+      // If new transaction has a longer/richer merchant name, update it
+      if (source.merchant.length > target.merchant.length && target.merchant.includes('עסקה ללא')) {
+        target.merchant = source.merchant;
+        target.description = source.description;
+      }
+    };
+
+    // 1. Direct strong match (identical date + amount + normalized merchant)
+    if (strongMap.has(strongKey)) {
+      const existing = strongMap.get(strongKey)!;
+      mergeIntoCanonical(existing, t);
       continue;
     }
 
-    // 2. Strong candidate match (same date and amount, merchant contains or is contained)
+    // 2. Strong candidate match on date and amount (merchant substring or containment)
     const daKey = `${t.date}_${amtStr}`;
     const candidates = dateAmountMap.get(daKey);
     let matchedCandidate: Transaction | null = null;
 
     if (candidates && candidates.length > 0) {
       for (const cand of candidates) {
-        const candM = cleanMerchant(cand.merchant);
+        const candM = normalizeMerchant(cand.merchant);
         if (
+          candM === normM ||
           (candM.length > 2 && normM.length > 2 && (candM.includes(normM) || normM.includes(candM))) ||
-          candM === normM
+          // Generic merchant name matching specific merchant
+          ((candM.includes('עסקה') || candM.includes('תשלום') || candM.includes('חיוב')) && normM.length > 2)
         ) {
           matchedCandidate = cand;
           break;
@@ -2442,22 +2507,29 @@ export function deduplicateTransactions(
       }
     }
 
-    if (matchedCandidate) {
-      duplicatesCount++;
-      if (t.sourceDocument && t.sourceDocument !== matchedCandidate.sourceDocument) {
-        if (!matchedCandidate.additionalSources) matchedCandidate.additionalSources = [];
-        if (!matchedCandidate.additionalSources.includes(t.sourceDocument)) {
-          matchedCandidate.additionalSources.push(t.sourceDocument);
+    // 3. Billing date match candidate
+    if (!matchedCandidate && t.billingDate) {
+      const bKey = `${t.billingDate}_${amtStr}`;
+      const bCandidates = billingAmountMap.get(bKey);
+      if (bCandidates && bCandidates.length > 0) {
+        for (const cand of bCandidates) {
+          const candM = normalizeMerchant(cand.merchant);
+          if (candM === normM || (candM.length > 2 && normM.length > 2 && (candM.includes(normM) || normM.includes(candM)))) {
+            matchedCandidate = cand;
+            break;
+          }
         }
       }
-      if (t.billingDate && !matchedCandidate.billingDate) {
-        matchedCandidate.billingDate = t.billingDate;
-      }
+    }
+
+    if (matchedCandidate) {
+      mergeIntoCanonical(matchedCandidate, t);
     } else {
-      // 3. Conservative review check: if same date and amount exist but merchant differs
+      // 4. Conservative review check: if same date and amount exist but distinct merchants
       if (candidates && candidates.length > 0) {
+        // Keep both records to avoid dropping legitimate distinct transactions!
         t.needsReview = true;
-        t.reviewReason = `התאמה אפשרית: קיימת עסקה נוספת בסכום ₪${t.amount} בתאריך זה (${candidates[0].merchant})`;
+        t.reviewReason = `נמצאה עסקה נוספת בסכום ₪${t.amount} בתאריך זה (${candidates[0].merchant}) – נדרש אימות שאינה כפולה`;
       }
 
       strongMap.set(strongKey, t);
@@ -2465,6 +2537,11 @@ export function deduplicateTransactions(
         dateAmountMap.set(daKey, []);
       }
       dateAmountMap.get(daKey)!.push(t);
+      if (t.billingDate) {
+        const bKey = `${t.billingDate}_${amtStr}`;
+        if (!billingAmountMap.has(bKey)) billingAmountMap.set(bKey, []);
+        billingAmountMap.get(bKey)!.push(t);
+      }
       uniqueTxs.push(t);
     }
   }

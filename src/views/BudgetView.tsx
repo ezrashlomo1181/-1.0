@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { BudgetCategory, Transaction } from '../types/financial';
+import { calculateCashFlowForPeriod } from '../services/financialCalculations';
 import {
   Plus,
   AlertTriangle,
@@ -30,6 +31,9 @@ export const BudgetView: React.FC<BudgetViewProps> = ({
   const [showNewCategory, setShowNewCategory] = useState(false);
   const [newCatName, setNewCatName] = useState('');
   const [newCatAmount, setNewCatAmount] = useState(1000);
+
+  const activePeriod = calculateCashFlowForPeriod(transactions);
+  const monthLabel = activePeriod.monthLabel;
 
   const totalAllocated = budgets.reduce((s, b) => s + b.allocated, 0);
   const totalSpent = budgets.reduce((s, b) => s + b.spent, 0);
@@ -78,7 +82,7 @@ export const BudgetView: React.FC<BudgetViewProps> = ({
           <h2 className="text-base font-bold text-slate-900 dark:text-white flex items-center gap-2">
             <span>ניהול ובקרת תקציב</span>
             <span className="text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
-              ספטמבר 2026
+              {monthLabel}
             </span>
           </h2>
           <p className="text-xs text-slate-500 dark:text-slate-400 mt-0.5">
