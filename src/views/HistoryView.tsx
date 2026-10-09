@@ -5,6 +5,7 @@ import {
   getTransactionCyclePeriod,
   detectFinancialCyclePattern,
   getCategoryColor,
+  calculateCashFlowForPeriod,
 } from '../services/financialCalculations';
 import {
   Calendar,
@@ -122,26 +123,45 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
       .sort((a, b) => b.date.localeCompare(a.date));
   }, [validTransactions, viewMode, financialCycle, selectedCycleKey, selectedMonthKey]);
 
+  // Central Period Data Calculation
+  const centralPeriodData = useMemo(() => {
+    if (viewMode === 'calendar') {
+      return calculateCashFlowForPeriod(validTransactions, selectedMonthKey);
+    }
+    return null;
+  }, [validTransactions, viewMode, selectedMonthKey]);
+
   // Calculations for selected period
   const totalIncome = useMemo(() => {
+    if (centralPeriodData) return centralPeriodData.income;
     return periodTransactions
       .filter((t) => t.type === 'income')
       .reduce((sum, t) => sum + t.amount, 0);
-  }, [periodTransactions]);
+  }, [centralPeriodData, periodTransactions]);
 
   const totalExpense = useMemo(() => {
-    return periodTransactions
-      .filter((t) => t.type === 'expense' || t.type === 'fee' || t.type === 'loan_payment')
-      .reduce((sum, t) => sum + t.amount, 0) -
+    if (centralPeriodData) return centralPeriodData.expenses;
+    return Math.max(
+      0,
       periodTransactions
-        .filter((t) => t.type === 'refund')
-        .reduce((sum, t) => sum + Math.abs(t.amount), 0);
-  }, [periodTransactions]);
+        .filter((t) => t.type === 'expense' || t.type === 'fee' || t.type === 'loan_payment')
+        .reduce((sum, t) => sum + t.amount, 0) -
+        periodTransactions
+          .filter((t) => t.type === 'refund')
+          .reduce((sum, t) => sum + Math.abs(t.amount), 0)
+    );
+  }, [centralPeriodData, periodTransactions]);
 
-  const netCashFlow = totalIncome - Math.max(0, totalExpense);
+  const netCashFlow = useMemo(() => {
+    if (centralPeriodData) return centralPeriodData.netCashFlow;
+    return totalIncome - totalExpense;
+  }, [centralPeriodData, totalIncome, totalExpense]);
 
   // Breakdown by category (Expenses)
   const expenseByCategory = useMemo(() => {
+    if (centralPeriodData) {
+      return centralPeriodData.categoryBreakdown;
+    }
     const map = new Map<string, number>();
     for (const t of periodTransactions) {
       if (t.type === 'expense' || t.type === 'fee' || t.type === 'loan_payment') {
@@ -159,9 +179,11 @@ export const HistoryView: React.FC<HistoryViewProps> = ({
         amount,
         percentage: totalExpense > 0 ? Math.round((amount / totalExpense) * 100) : 0,
         color: getCategoryColor(category),
+        count: 0,
+        transactions: [],
       }));
     return arr.sort((a, b) => b.amount - a.amount);
-  }, [periodTransactions, totalExpense]);
+  }, [centralPeriodData, periodTransactions, totalExpense]);
 
   // Breakdown by category (Income)
   const incomeByCategory = useMemo(() => {

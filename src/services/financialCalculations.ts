@@ -382,45 +382,26 @@ export function getCashFlowHistory(
   const valid = transactions.filter((t) => !t.isInternalTransfer && t.type !== 'transfer');
   if (valid.length === 0) return [];
 
-  // Group by real transaction month (YYYY-MM), bounded <= CURRENT_APP_MONTH
-  const monthMap = new Map<string, { income: number; expense: number }>();
+  // Find all distinct historical months <= CURRENT_APP_MONTH
+  const monthKeys = Array.from(
+    new Set(
+      valid
+        .map((t) => t.date?.substring(0, 7))
+        .filter((k) => k && k <= CURRENT_APP_MONTH)
+    )
+  ).sort((a, b) => a.localeCompare(b));
 
-  for (const t of valid) {
-    if (!t.date || t.date.length < 7) continue;
-    const monthKey = t.date.substring(0, 7);
-    // Future date protection: exclude any future month from historical cash flow graph
-    if (monthKey > CURRENT_APP_MONTH) continue;
-
-    const curr = monthMap.get(monthKey) || { income: 0, expense: 0 };
-
-    if (txIsIncome(t)) {
-      curr.income += t.amount;
-    } else if (t.type === 'refund') {
-      curr.expense -= Math.abs(t.amount);
-    } else if (t.type === 'expense' || t.type === 'fee' || t.type === 'loan_payment') {
-      curr.expense += Math.abs(t.amount);
-    }
-
-    monthMap.set(monthKey, curr);
-  }
-
-  // Sort chronologically ascending
-  const sortedMonthKeys = Array.from(monthMap.keys()).sort((a, b) => a.localeCompare(b));
-  const recentKeys = sortedMonthKeys.slice(-maxMonths);
+  const recentKeys = monthKeys.slice(-maxMonths);
 
   const points: MonthDataPoint[] = [];
   for (const key of recentKeys) {
-    const val = monthMap.get(key)!;
-    const expense = Math.max(0, val.expense);
-    const income = Math.max(0, val.income);
-    const savings = Math.max(0, income - expense);
-
+    const period = calculateCashFlowForPeriod(transactions, key);
     points.push({
       monthKey: key,
-      monthLabel: formatMonthKeyLabel(key),
-      income: Math.round(income),
-      expense: Math.round(expense),
-      savings: Math.round(savings),
+      monthLabel: period.monthLabel,
+      income: period.income,
+      expense: period.expenses,
+      savings: Math.max(0, period.netCashFlow),
     });
   }
 

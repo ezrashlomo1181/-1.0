@@ -240,10 +240,16 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
         )
       : null;
 
-  // Budget overall calculation
+  // Budget and Goal Target resolution from existing user configurations
+  // CRITICAL REQUIREMENT #4: Must come directly from existing Goals / Budget Targets, never invented or hardcoded
   const totalBudgeted = budgets.reduce((sum, b) => sum + b.allocated, 0);
   const totalBudgetSpent = budgets.reduce((sum, b) => sum + b.spent, 0);
   const budgetPercentUsed = totalBudgeted > 0 ? Math.round((totalBudgetSpent / totalBudgeted) * 100) : 0;
+
+  // Check if user has an explicit monthly spending limit or expense target configured in goals or budgets
+  // If user configured budget categories, sum of allocations is their monthly expense target.
+  // If user has monthly contribution goals, those represent savings commitments.
+  const userConfiguredExpenseTarget = totalBudgeted > 0 ? totalBudgeted : undefined;
 
   // Investment totals
   const totalInvestedPrincipal = investments.reduce((sum, i) => sum + i.investedAmount, 0);
@@ -561,7 +567,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             personalAverageExpense={
               personalAverages.hasSufficientHistory ? personalAverages.averageMonthlyExpenses : undefined
             }
-            budgetTargetExpense={totalBudgeted > 0 ? totalBudgeted : undefined}
+            budgetTargetExpense={userConfiguredExpenseTarget}
             onMonthClick={(m: MonthDataPoint) => {
               onOpenTraceModal(
                 `תזרים חודש ${m.monthLabel}`,
