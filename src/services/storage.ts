@@ -41,12 +41,58 @@ export interface AppState {
 
 const STORAGE_KEY = 'matzpen_financial_app_state_v1';
 
+/**
+ * Stage 1: Non-destructive backward-compatible migration for transactions.
+ * Preserves all original transaction fields and meaning while ensuring
+ * sourceRecords, refund flags and ignored state are initialized.
+ */
+export function migrateTransactionToV2(t: Transaction): Transaction {
+  if (!t) return t;
+
+  // Initialize sourceRecords if not present
+  const sourceRecords = (t.sourceRecords && Array.isArray(t.sourceRecords) && t.sourceRecords.length > 0)
+    ? t.sourceRecords
+    : [
+        {
+          id: `src_${t.id}`,
+          documentId: undefined,
+          sourceDocument: t.sourceDocument || 'ייבוא מקורי',
+          sourceDocumentType: t.sourceDocumentType,
+          rawText: t.rawText,
+          amount: t.amount,
+          date: t.date,
+          originalDate: t.originalDate,
+          description: t.description,
+          merchant: t.merchant,
+          accountId: t.accountId,
+          accountName: t.accountName,
+          paymentMethod: t.paymentMethod,
+          importedAt: new Date().toISOString(),
+          idempotencyKey: t.id,
+        },
+      ];
+
+  // Refinement #1: Independent refunds without artificial category/month guessing
+  const isIndependentRefund =
+    t.type === 'refund' && !t.linkedExpenseId
+      ? (t.isIndependentRefund !== undefined ? t.isIndependentRefund : true)
+      : t.isIndependentRefund;
+
+  return {
+    ...t,
+    sourceRecords,
+    ignored: t.ignored ?? false,
+    isIndependentRefund,
+  };
+}
+
 export function loadInitialState(): AppState {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.transactions)) {
+        parsed.transactions = parsed.transactions.map(migrateTransactionToV2);
         if (!Array.isArray(parsed.documents)) {
           parsed.documents = INITIAL_DOCUMENTS;
         }
@@ -60,7 +106,7 @@ export function loadInitialState(): AppState {
   return {
     isDemoMode: true,
     accounts: INITIAL_ACCOUNTS,
-    transactions: INITIAL_TRANSACTIONS,
+    transactions: INITIAL_TRANSACTIONS.map(migrateTransactionToV2),
     budgets: INITIAL_BUDGETS,
     goals: INITIAL_GOALS,
     investments: INITIAL_INVESTMENTS,
@@ -134,6 +180,7 @@ export function loadUserSpecificState(userId: string): AppState | null {
     if (raw) {
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.transactions)) {
+        parsed.transactions = parsed.transactions.map(migrateTransactionToV2);
         if (!Array.isArray(parsed.documents)) {
           parsed.documents = [];
         }

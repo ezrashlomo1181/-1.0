@@ -12,6 +12,54 @@ export type TransactionType =
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
+export type IgnoredReason =
+  | 'duplicate_copy'       // התעלמות מעותק כפול (עסקה זהה שנמצאת כבר במערכת)
+  | 'user_excluded_real'  // החלטת משתמש להחריג עסקה אמיתית מהחישובים הפיננסיים
+  | 'settlement_covered'  // חיוב מרוכז שכוסה ע"י עסקאות מפורטות
+  | 'other';
+
+export interface SourceRecord {
+  id: string; // unique ID or hash of source appearance
+  documentId?: string;
+  sourceDocument: string;
+  sourceDocumentType?: 'bank_statement' | 'credit_card_statement' | 'detailed_report' | 'other';
+  rawText?: string;
+  amount: number;
+  date: string;
+  originalDate?: string;
+  description: string;
+  merchant?: string;
+  accountId?: string;
+  accountName?: string;
+  paymentMethod?: 'credit_card' | 'bank_transfer' | 'direct_debit' | 'cash' | 'bit' | 'paybox';
+  importedAt: string;
+  idempotencyKey?: string; // hash/fingerprint of source row to detect re-import of identical source row
+}
+
+export interface MergeHistorySnapshot {
+  mergedAt: string;
+  reason: string;
+  confidenceScore: number;
+  // Snapshot of pre-merge transactions with original IDs, classifications and decision history
+  originalTransactions: Transaction[];
+}
+
+export interface DuplicateCandidate {
+  existingTransactionId: string;
+  incomingRecord: SourceRecord;
+  confidenceScore: number;
+  matchType: 'exact_duplicate' | 'cross_document_merge' | 'competing_candidate' | 'uncertain';
+  reasons: string[];
+  suggestedAction: 'merge_auto' | 'review_required' | 'keep_both';
+}
+
+export interface VerificationDecision {
+  transactionId: string;
+  action: 'approve' | 'merge' | 'keep_separate' | 'ignore' | 'unmerge';
+  reason?: string;
+  timestamp: string;
+}
+
 export interface Transaction {
   id: string;
   date: string; // YYYY-MM-DD
@@ -48,6 +96,24 @@ export interface Transaction {
   reconciliationEvidence?: string;
   isAggregateSettlement?: boolean; // true if bank consolidated card debit matched to detailed transactions
   isFuture?: boolean; // true if transaction date is in the future relative to current date
+
+  // Multi-source and deduplication model (Stage 1)
+  sourceRecords?: SourceRecord[];
+  mergeHistory?: MergeHistorySnapshot[];
+  originalTransactionId?: string;
+  idempotencyKey?: string;
+
+  // Ignore / Exclusion tracking (Refinement #2)
+  ignored?: boolean;
+  ignoredReason?: IgnoredReason;
+  ignoredAt?: string;
+  ignoredByUser?: boolean;
+  ignoredNotes?: string;
+
+  // Refund tracking (Refinement #1)
+  linkedExpenseId?: string; // links to original expense transaction if identified
+  isIndependentRefund?: boolean; // true if standalone refund not linked to specific original expense
+  deductsFromExpense?: boolean; // indicates accounting behavior
 }
 
 export interface Account {
