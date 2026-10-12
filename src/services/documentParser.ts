@@ -967,6 +967,292 @@ function buildTransactionObject(params: {
 }
 
 // -------------------------------------------------------------
+// HEADER COLUMN CLASSIFIER & SPECIFICITY RESOLVER
+// -------------------------------------------------------------
+export interface HeaderColumnMapping {
+  dateCol: number;
+  billingDateCol: number;
+  descCol: number;
+  amountCol: number;
+  billingAmountCol: number;
+  debitCol: number;
+  creditCol: number;
+  categoryCol: number;
+  refCol: number;
+  isHeaderRow: boolean;
+}
+
+export function identifyHeaderColumns(rowCells: string[]): HeaderColumnMapping {
+  let bestDateCol = -1;
+  let bestDateScore = 0;
+
+  let bestBillingDateCol = -1;
+  let bestBillingDateScore = 0;
+
+  let bestDescCol = -1;
+  let bestDescScore = 0;
+
+  let fAmount = -1;
+  let fBillingAmount = -1;
+  let fDebit = -1;
+  let fCredit = -1;
+  let fCat = -1;
+  let fRef = -1;
+
+  rowCells.forEach((cell, idx) => {
+    const raw = cleanFinancialString(cell || '').trim();
+    if (!raw) return;
+    const t = raw.toLowerCase();
+
+    // -------------------------------------------------------------
+    // 1. DATE CLASSIFICATION WITH EXPLICIT SPECIFICITY PRIORITY
+    // -------------------------------------------------------------
+    const isExplicitBillingDate =
+      t.includes('תאריך חיוב') ||
+      t.includes('תאריך החיוב') ||
+      t.includes('מועד חיוב') ||
+      t.includes('מועד החיוב') ||
+      t.includes('ת.חיוב') ||
+      t.includes('תאריך ערך') ||
+      t.includes('תאריך הערך') ||
+      t.includes('מועד ערך') ||
+      t.includes('מועד הערך') ||
+      t.includes('ת.ערך') ||
+      t.includes('יום ערך') ||
+      t === 'billing date' ||
+      t === 'value date' ||
+      t === 'due date';
+
+    const isExplicitTxDate =
+      t.includes('תאריך עסקה') ||
+      t.includes('תאריך העסקה') ||
+      t.includes('מועד עסקה') ||
+      t.includes('מועד העסקה') ||
+      t.includes('ת.עסקה') ||
+      t.includes('תאריך רכישה') ||
+      t.includes('תאריך הרכישה') ||
+      t.includes('מועד רכישה') ||
+      t.includes('מועד הרכישה') ||
+      t.includes('ת.רכישה') ||
+      t.includes('תאריך קניה') ||
+      t.includes('תאריך פעולה') ||
+      t.includes('תאריך הפעולה') ||
+      t.includes('מועד פעולה') ||
+      t.includes('מועד הפעולה') ||
+      t.includes('תאריך ביצוע') ||
+      t.includes('תאריך הביצוע') ||
+      t.includes('מועד ביצוע') ||
+      t === 'transaction date' ||
+      t === 'trans date' ||
+      t === 'tx date' ||
+      t === 'purchase date';
+
+    const isPostingDate =
+      t.includes('תאריך רישום') ||
+      t.includes('תאריך הצגה') ||
+      t.includes('posting date');
+
+    const isGeneralDate =
+      !isExplicitBillingDate &&
+      !isExplicitTxDate &&
+      !isPostingDate &&
+      (t === 'תאריך' ||
+       t === 'ת.תאריך' ||
+       t === 'date' ||
+       t === 'יום' ||
+       /^תאריך\b/.test(t));
+
+    if (isExplicitBillingDate) {
+      if (bestBillingDateScore < 100) {
+        bestBillingDateCol = idx;
+        bestBillingDateScore = 100;
+      }
+      // Can serve as fallback date if no transaction/general date exists
+      if (bestDateScore < 20) {
+        bestDateCol = idx;
+        bestDateScore = 20;
+      }
+    } else if (isExplicitTxDate) {
+      if (bestDateScore < 100) {
+        bestDateCol = idx;
+        bestDateScore = 100;
+      }
+    } else if (isGeneralDate) {
+      if (bestDateScore < 70) {
+        bestDateCol = idx;
+        bestDateScore = 70;
+      }
+    } else if (isPostingDate) {
+      if (bestDateScore < 40) {
+        bestDateCol = idx;
+        bestDateScore = 40;
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 2. DESCRIPTION & MERCHANT VS. ACTION TYPE / CATEGORY
+    // -------------------------------------------------------------
+    const isActionTypeOrCategory =
+      t.includes('סוג פעולה') ||
+      t.includes('סוג הפעולה') ||
+      t.includes('סוג עסקה') ||
+      t.includes('סוג העסקה') ||
+      t.includes('סוג תנועה') ||
+      t.includes('סוג התנועה') ||
+      t.includes('קטגוריה') ||
+      t.includes('ענף') ||
+      t === 'category' ||
+      t === 'sector' ||
+      t === 'action type' ||
+      t === 'transaction type';
+
+    if (isActionTypeOrCategory) {
+      // Prioritize setting category column; NEVER set as primary description
+      if (fCat === -1 || t.includes('סוג פעולה') || t.includes('קטגוריה')) {
+        fCat = idx;
+      }
+    } else {
+      // Explicit Merchant / Payee
+      const isExplicitMerchant =
+        t.includes('שם בית עסק') ||
+        t.includes('שם בית העסק') ||
+        t.includes('בית עסק') ||
+        t.includes('שם ספק') ||
+        t.includes('שם העסק') ||
+        t.includes('שם מוטב') ||
+        t.includes('מוטב') ||
+        t.includes('שם הנמען') ||
+        t.includes('נמען') ||
+        t === 'merchant' ||
+        t === 'payee' ||
+        t === 'business' ||
+        t === 'vendor';
+
+      // Explicit Description / Details (Must NOT be pure action type)
+      const isExplicitDescription =
+        t.includes('תיאור הפעולה') ||
+        t.includes('תיאור פעולה') ||
+        t.includes('שם הפעולה') ||
+        t.includes('מהות הפעולה') ||
+        t.includes('פרטי פעולה') ||
+        t.includes('פרטי הפעולה') ||
+        t.includes('פירוט פעולה') ||
+        t.includes('פירוט הפעולה') ||
+        t.includes('פרטי עסקה') ||
+        t.includes('פרטי העסקה') ||
+        t.includes('פירוט עסקה') ||
+        t.includes('פירוט העסקה') ||
+        t.includes('תיאור עסקה') ||
+        t.includes('פרטים נוספים') ||
+        t.includes('תיאור') ||
+        t.includes('פירוט') ||
+        t.includes('פרטים') ||
+        t.includes('ספק') ||
+        t === 'description' ||
+        t === 'details' ||
+        t === 'memo';
+
+      if (isExplicitMerchant) {
+        if (bestDescScore < 100) {
+          bestDescCol = idx;
+          bestDescScore = 100;
+        }
+      } else if (isExplicitDescription) {
+        if (bestDescScore < 80) {
+          bestDescCol = idx;
+          bestDescScore = 80;
+        }
+      } else if (t === 'פעולה' || t === 'operation') {
+        // Low priority fallback only if no explicit merchant or description found
+        if (bestDescScore < 30) {
+          bestDescCol = idx;
+          bestDescScore = 30;
+        }
+      }
+    }
+
+    // -------------------------------------------------------------
+    // 3. AMOUNTS (DEBIT, CREDIT, BILLING AMOUNT, ORIGINAL AMOUNT)
+    // -------------------------------------------------------------
+    if (
+      t.includes('חובה') ||
+      t.includes('סכום חובה') ||
+      t.includes('משיכה') ||
+      t === 'debit'
+    ) {
+      if (fDebit === -1 || t.includes('חובה')) fDebit = idx;
+    } else if (
+      t.includes('זכות') ||
+      t.includes('סכום זכות') ||
+      t.includes('זיכוי') ||
+      t.includes('הפקדה') ||
+      t.includes('הכנסה') ||
+      t === 'credit' ||
+      t === 'deposit'
+    ) {
+      if (fCredit === -1 || t.includes('זכות')) fCredit = idx;
+    } else if (
+      t.includes('סכום חיוב') ||
+      t.includes('סכום לחיוב') ||
+      t.includes('סכום לתשלום') ||
+      t.includes('סכום בפועל') ||
+      t.includes('סכום בש"ח') ||
+      t.includes('סכום בשח') ||
+      t.includes('סכום חיוב בש"ח') ||
+      t.includes('סכום חיוב בשח') ||
+      t.includes('billing amount')
+    ) {
+      if (fBillingAmount === -1) fBillingAmount = idx;
+    } else if (
+      t.includes('סכום עסקה') ||
+      t.includes('סכום בעסקה') ||
+      t.includes('סכום מקורי') ||
+      t.includes('סכום עסקה מקורי') ||
+      t.includes('סכום') ||
+      t === 'amount'
+    ) {
+      if (fAmount === -1) fAmount = idx;
+    }
+
+    // -------------------------------------------------------------
+    // 4. REFERENCE / VOUCHER
+    // -------------------------------------------------------------
+    if (
+      t.includes('אסמכתא') ||
+      t.includes('שובר') ||
+      t.includes('מספר שובר') ||
+      t.includes('מספר אסמכתא') ||
+      t.includes('אסמכתה') ||
+      t.includes('ref') ||
+      t.includes('voucher') ||
+      t.includes('reference')
+    ) {
+      if (fRef === -1) fRef = idx;
+    }
+  });
+
+  const finalDateCol = bestDateCol !== -1 ? bestDateCol : bestBillingDateCol;
+  const finalBillingDateCol = bestBillingDateCol;
+
+  const isHeaderRow =
+    (finalDateCol !== -1 || finalBillingDateCol !== -1) &&
+    (bestDescCol !== -1 || fAmount !== -1 || fBillingAmount !== -1 || fDebit !== -1 || fCredit !== -1);
+
+  return {
+    dateCol: finalDateCol,
+    billingDateCol: finalBillingDateCol,
+    descCol: bestDescCol,
+    amountCol: fAmount,
+    billingAmountCol: fBillingAmount,
+    debitCol: fDebit,
+    creditCol: fCredit,
+    categoryCol: fCat,
+    refCol: fRef,
+    isHeaderRow,
+  };
+}
+
+// -------------------------------------------------------------
 // UNIFIED SPREADSHEET & CSV ROW EXTRACTOR
 // -------------------------------------------------------------
 export function extractTransactionsFromRawRows(
@@ -999,165 +1285,18 @@ export function extractTransactionsFromRawRows(
     const row = rawRows[r].map((cell) => cleanFinancialString(cell));
     if (row.length === 0 || row.every((c) => !c)) continue;
 
-    // Check if row is a section header row
-    let fDate = -1;
-    let fBillingDate = -1;
-    let fDesc = -1;
-    let fAmount = -1;
-    let fBillingAmount = -1;
-    let fDebit = -1;
-    let fCredit = -1;
-    let fCat = -1;
-    let fRef = -1;
-
-    row.forEach((colText, idx) => {
-      const t = colText.toLowerCase();
-
-      // 1. Billing / Value date
-      if (
-        t.includes('תאריך חיוב') ||
-        t.includes('תאריך החיוב') ||
-        t.includes('מועד חיוב') ||
-        t.includes('מועד החיוב') ||
-        t.includes('ת.חיוב') ||
-        t.includes('תאריך ערך') ||
-        t.includes('תאריך הערך') ||
-        t.includes('מועד ערך') ||
-        t.includes('ת.ערך') ||
-        t.includes('billing date') ||
-        t.includes('value date') ||
-        t.includes('due date')
-      ) {
-        fBillingDate = idx;
-      }
-      // 2. Transaction / Purchase date
-      else if (
-        t.includes('תאריך רכישה') ||
-        t.includes('תאריך קניה') ||
-        t.includes('מועד רכישה') ||
-        t.includes('מועד עסקה') ||
-        t.includes('תאריך פעולה') ||
-        t.includes('תאריך ביצוע') ||
-        t.includes('תאריך עסקה') ||
-        t.includes('תאריך העסקה') ||
-        t.includes('ת.עסקה') ||
-        t.includes('ת.רכישה') ||
-        t.includes('תאריך רישום') ||
-        t.includes('תאריך הצגה') ||
-        t.includes('תאריך') ||
-        t === 'date' ||
-        t === 'transaction date' ||
-        t === 'יום'
-      ) {
-        fDate = idx;
-      }
-      // 3. Merchant / Description
-      else if (
-        t.includes('שם בית עסק') ||
-        t.includes('שם בית העסק') ||
-        t.includes('שם ספק') ||
-        t.includes('שם העסק') ||
-        t.includes('בית עסק') ||
-        t.includes('פרטי עסקה') ||
-        t.includes('פרטי פעולה') ||
-        t.includes('פירוט פעולה') ||
-        t.includes('פירוט עסקה') ||
-        t.includes('פירוט') ||
-        t.includes('תיאור') ||
-        t.includes('פעולה') ||
-        t.includes('שם הפעולה') ||
-        t.includes('תיאור הפעולה') ||
-        t.includes('פרטים') ||
-        t.includes('ספק') ||
-        t.includes('merchant') ||
-        t.includes('description') ||
-        t.includes('details')
-      ) {
-        fDesc = idx;
-      }
-      // 4. Debit column
-      else if (
-        t.includes('חובה') ||
-        t.includes('סכום חובה') ||
-        t.includes('משיכה') ||
-        t === 'debit'
-      ) {
-        fDebit = idx;
-      }
-      // 5. Credit column
-      else if (
-        t.includes('זכות') ||
-        t.includes('סכום זכות') ||
-        t.includes('זיכוי') ||
-        t.includes('הפקדה') ||
-        t.includes('הכנסה') ||
-        t === 'credit' ||
-        t === 'deposit'
-      ) {
-        fCredit = idx;
-      }
-      // 6. Billing amount (Actual ILS charge on Israeli cards)
-      else if (
-        t.includes('סכום חיוב') ||
-        t.includes('סכום לחיוב') ||
-        t.includes('סכום לתשלום') ||
-        t.includes('סכום בפועל') ||
-        t.includes('סכום בש"ח') ||
-        t.includes('סכום בשח') ||
-        t.includes('סכום חיוב בש"ח') ||
-        t.includes('סכום חיוב בשח') ||
-        t.includes('billing amount')
-      ) {
-        fBillingAmount = idx;
-      }
-      // 7. Original / General amount
-      else if (
-        t.includes('סכום עסקה') ||
-        t.includes('סכום בעסקה') ||
-        t.includes('סכום מקורי') ||
-        t.includes('סכום עסקה מקורי') ||
-        t.includes('סכום') ||
-        t === 'amount'
-      ) {
-        fAmount = idx;
-      }
-      // 8. Category / Sector
-      else if (
-        t.includes('קטגוריה') ||
-        t.includes('ענף') ||
-        t.includes('סוג עסקה') ||
-        t.includes('סוג פעולה') ||
-        t.includes('category')
-      ) {
-        fCat = idx;
-      }
-      // 9. Reference / Voucher
-      else if (
-        t.includes('אסמכתא') ||
-        t.includes('שובר') ||
-        t.includes('מספר שובר') ||
-        t.includes('מספר אסמכתא') ||
-        t.includes('ref') ||
-        t.includes('voucher')
-      ) {
-        fRef = idx;
-      }
-    });
-
-    // If row matches header criteria, update active mappings
-    if (
-      (fDate !== -1 || fBillingDate !== -1) &&
-      (fDesc !== -1 || fAmount !== -1 || fBillingAmount !== -1 || fDebit !== -1 || fCredit !== -1)
-    ) {
-      activeDateCol = fDate !== -1 ? fDate : fBillingDate;
-      activeBillingDateCol = fBillingDate;
-      if (fDesc !== -1) activeDescCol = fDesc;
-      if (fBillingAmount !== -1) activeBillingAmountCol = fBillingAmount;
-      if (fAmount !== -1) activeAmountCol = fAmount;
-      if (fDebit !== -1) activeDebitCol = fDebit;
-      if (fCredit !== -1) activeCreditCol = fCredit;
-      if (fCat !== -1) activeCategoryCol = fCat;
-      if (fRef !== -1) activeRefCol = fRef;
+    // Check if row is a section header row using prioritized classification
+    const headerMapping = identifyHeaderColumns(row);
+    if (headerMapping.isHeaderRow) {
+      activeDateCol = headerMapping.dateCol;
+      activeBillingDateCol = headerMapping.billingDateCol;
+      if (headerMapping.descCol !== -1) activeDescCol = headerMapping.descCol;
+      if (headerMapping.billingAmountCol !== -1) activeBillingAmountCol = headerMapping.billingAmountCol;
+      if (headerMapping.amountCol !== -1) activeAmountCol = headerMapping.amountCol;
+      if (headerMapping.debitCol !== -1) activeDebitCol = headerMapping.debitCol;
+      if (headerMapping.creditCol !== -1) activeCreditCol = headerMapping.creditCol;
+      if (headerMapping.categoryCol !== -1) activeCategoryCol = headerMapping.categoryCol;
+      if (headerMapping.refCol !== -1) activeRefCol = headerMapping.refCol;
       continue;
     }
 
@@ -1492,131 +1631,18 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
     const cols = parseLine(lines[i]);
     if (cols.length <= 1) continue;
 
-    // Check if line is a header row
-    let fDate = -1;
-    let fBillingDate = -1;
-    let fDesc = -1;
-    let fAmount = -1;
-    let fBillingAmount = -1;
-    let fDebit = -1;
-    let fCredit = -1;
-    let fCat = -1;
-    let fRef = -1;
-
-    cols.forEach((col, idx) => {
-      const c = col.toLowerCase();
-      if (
-        c.includes('תאריך חיוב') ||
-        c.includes('תאריך החיוב') ||
-        c.includes('מועד חיוב') ||
-        c.includes('מועד החיוב') ||
-        c.includes('ת.חיוב') ||
-        c.includes('תאריך ערך') ||
-        c.includes('תאריך הערך') ||
-        c.includes('מועד ערך') ||
-        c.includes('ת.ערך') ||
-        c.includes('billing date') ||
-        c.includes('value date') ||
-        c.includes('due date')
-      ) {
-        fBillingDate = idx;
-      } else if (
-        c.includes('תאריך רכישה') ||
-        c.includes('תאריך קניה') ||
-        c.includes('מועד רכישה') ||
-        c.includes('מועד עסקה') ||
-        c.includes('תאריך פעולה') ||
-        c.includes('תאריך ביצוע') ||
-        c.includes('תאריך עסקה') ||
-        c.includes('תאריך העסקה') ||
-        c.includes('ת.עסקה') ||
-        c.includes('ת.רכישה') ||
-        c.includes('תאריך רישום') ||
-        c.includes('תאריך הצגה') ||
-        c.includes('תאריך') ||
-        c === 'date' ||
-        c === 'transaction date' ||
-        c === 'יום'
-      ) {
-        fDate = idx;
-      } else if (
-        c.includes('שם בית עסק') ||
-        c.includes('שם בית העסק') ||
-        c.includes('שם ספק') ||
-        c.includes('שם העסק') ||
-        c.includes('בית עסק') ||
-        c.includes('פרטי עסקה') ||
-        c.includes('פרטי פעולה') ||
-        c.includes('פירוט פעולה') ||
-        c.includes('פירוט עסקה') ||
-        c.includes('פירוט') ||
-        c.includes('תיאור') ||
-        c.includes('פעולה') ||
-        c.includes('שם הפעולה') ||
-        c.includes('תיאור הפעולה') ||
-        c.includes('פרטים') ||
-        c.includes('ספק') ||
-        c.includes('merchant') ||
-        c.includes('description') ||
-        c.includes('business')
-      ) {
-        fDesc = idx;
-      } else if (
-        c.includes('חובה') ||
-        c.includes('סכום חובה') ||
-        c.includes('משיכה') ||
-        c === 'debit'
-      ) {
-        fDebit = idx;
-      } else if (
-        c.includes('זכות') ||
-        c.includes('סכום זכות') ||
-        c.includes('זיכוי') ||
-        c.includes('הפקדה') ||
-        c.includes('הכנסה') ||
-        c === 'credit'
-      ) {
-        fCredit = idx;
-      } else if (
-        c.includes('סכום חיוב') ||
-        c.includes('סכום לחיוב') ||
-        c.includes('סכום לתשלום') ||
-        c.includes('סכום בפועל') ||
-        c.includes('סכום בש"ח') ||
-        c.includes('סכום בשח') ||
-        c.includes('סכום חיוב בש"ח') ||
-        c.includes('סכום חיוב בשח')
-      ) {
-        fBillingAmount = idx;
-      } else if (
-        c.includes('סכום עסקה') ||
-        c.includes('סכום בעסקה') ||
-        c.includes('סכום מקורי') ||
-        c.includes('סכום עסקה מקורי') ||
-        c.includes('סכום') ||
-        c === 'amount'
-      ) {
-        fAmount = idx;
-      } else if (c.includes('קטגוריה') || c.includes('ענף') || c.includes('סוג עסקה')) {
-        fCat = idx;
-      } else if (c.includes('אסמכתא') || c.includes('שובר') || c.includes('מספר שובר') || c.includes('ref')) {
-        fRef = idx;
-      }
-    });
-
-    if (
-      (fDate !== -1 || fBillingDate !== -1) &&
-      (fDesc !== -1 || fAmount !== -1 || fBillingAmount !== -1 || fDebit !== -1 || fCredit !== -1)
-    ) {
-      activeDateCol = fDate !== -1 ? fDate : fBillingDate;
-      activeBillingDateCol = fBillingDate;
-      if (fDesc !== -1) activeDescCol = fDesc;
-      if (fBillingAmount !== -1) activeBillingAmountCol = fBillingAmount;
-      if (fAmount !== -1) activeAmountCol = fAmount;
-      if (fDebit !== -1) activeDebitCol = fDebit;
-      if (fCredit !== -1) activeCreditCol = fCredit;
-      if (fCat !== -1) activeCategoryCol = fCat;
-      if (fRef !== -1) activeRefCol = fRef;
+    // Check if line is a header row using prioritized classification
+    const headerMapping = identifyHeaderColumns(cols);
+    if (headerMapping.isHeaderRow) {
+      activeDateCol = headerMapping.dateCol;
+      activeBillingDateCol = headerMapping.billingDateCol;
+      if (headerMapping.descCol !== -1) activeDescCol = headerMapping.descCol;
+      if (headerMapping.billingAmountCol !== -1) activeBillingAmountCol = headerMapping.billingAmountCol;
+      if (headerMapping.amountCol !== -1) activeAmountCol = headerMapping.amountCol;
+      if (headerMapping.debitCol !== -1) activeDebitCol = headerMapping.debitCol;
+      if (headerMapping.creditCol !== -1) activeCreditCol = headerMapping.creditCol;
+      if (headerMapping.categoryCol !== -1) activeCategoryCol = headerMapping.categoryCol;
+      if (headerMapping.refCol !== -1) activeRefCol = headerMapping.refCol;
       continue;
     }
 
@@ -1801,64 +1827,17 @@ export function parseHtmlContent(html: string, fileName: string): ParseResult {
 
     for (let i = 0; i < Math.min(trs.length, 30); i++) {
       const cells = Array.from(trs[i].querySelectorAll('th, td')).map((c) => (c.textContent || '').trim());
-      let fDate = -1;
-      let fBillingDate = -1;
-      let fDesc = -1;
-      let fAmount = -1;
-      let fDebit = -1;
-      let fCredit = -1;
-
-      cells.forEach((text, idx) => {
-        const t = text.toLowerCase();
-        if (
-          t.includes('תאריך חיוב') ||
-          t.includes('מועד חיוב') ||
-          t.includes('ת.חיוב') ||
-          t.includes('billing date') ||
-          t.includes('value date')
-        ) {
-          fBillingDate = idx;
-        } else if (
-          t.includes('תאריך רכישה') ||
-          t.includes('תאריך עסקה') ||
-          t.includes('מועד רכישה') ||
-          t.includes('ת.עסקה') ||
-          t.includes('תאריך') ||
-          t === 'date'
-        ) {
-          fDate = idx;
-        } else if (
-          t.includes('שם בית עסק') ||
-          t.includes('בית עסק') ||
-          t.includes('שם ספק') ||
-          t.includes('תיאור') ||
-          t.includes('פרטים') ||
-          t.includes('פעולה') ||
-          t.includes('merchant') ||
-          t.includes('description')
-        ) {
-          fDesc = idx;
-        } else if (t.includes('חובה') || t.includes('חיוב') || t === 'debit') {
-          fDebit = idx;
-        } else if (t.includes('זכות') || t.includes('זיכוי') || t.includes('הפקדה') || t.includes('הכנסה') || t === 'credit') {
-          fCredit = idx;
-        } else if (t.includes('סכום') || t === 'amount') {
-          fAmount = idx;
-        } else if (t.includes('קטגוריה') || t.includes('ענף')) {
-          categoryCol = idx;
-        } else if (t.includes('אסמכתא') || t.includes('שובר')) {
-          refCol = idx;
-        }
-      });
-
-      if ((fDate !== -1 || fBillingDate !== -1) && (fDesc !== -1 || fAmount !== -1 || fDebit !== -1 || fCredit !== -1)) {
+      const headerMapping = identifyHeaderColumns(cells);
+      if (headerMapping.isHeaderRow) {
         headerIndex = i;
-        dateCol = fDate !== -1 ? fDate : fBillingDate;
-        billingDateCol = fBillingDate;
-        descCol = fDesc;
-        amountCol = fAmount;
-        debitCol = fDebit;
-        creditCol = fCredit;
+        dateCol = headerMapping.dateCol;
+        billingDateCol = headerMapping.billingDateCol;
+        descCol = headerMapping.descCol;
+        amountCol = headerMapping.amountCol;
+        debitCol = headerMapping.debitCol;
+        creditCol = headerMapping.creditCol;
+        if (headerMapping.categoryCol !== -1) categoryCol = headerMapping.categoryCol;
+        if (headerMapping.refCol !== -1) refCol = headerMapping.refCol;
         break;
       }
     }
