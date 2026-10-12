@@ -13,19 +13,38 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <script>
-      // Ignore WebSocket / HMR disconnection errors in AI Studio iframe environment
+      // Ignore only specific Vite HMR WebSocket disconnection errors in AI Studio iframe environment
+      function isViteHmrWebSocketError(msg, stack, filename) {
+        msg = msg || '';
+        stack = stack || '';
+        filename = filename || '';
+        // 1. Specific WebSocket closed without opened error
+        if (msg.includes('WebSocket closed without opened') || stack.includes('WebSocket closed without opened')) {
+          return true;
+        }
+        // 2. Explicit WebSocket error originating from @vite/client
+        var isFromViteClient = filename.includes('@vite/client') || stack.includes('@vite/client');
+        var isWsError = msg.toLowerCase().includes('websocket') || stack.toLowerCase().includes('websocket');
+        if (isFromViteClient && isWsError) {
+          return true;
+        }
+        return false;
+      }
+
       window.addEventListener('unhandledrejection', function(event) {
         var reason = event.reason;
         var msg = (reason && (reason.message || String(reason))) || '';
         var stack = (reason && reason.stack) || '';
-        if (msg.includes('WebSocket') || stack.includes('@vite/client') || stack.includes('vite')) {
+        if (isViteHmrWebSocketError(msg, stack, '')) {
           event.preventDefault();
         }
       });
       window.addEventListener('error', function(event) {
         var msg = event.message || '';
         var filename = event.filename || '';
-        if (msg.includes('WebSocket') || filename.includes('@vite/client')) {
+        var error = event.error;
+        var stack = (error && error.stack) || '';
+        if (isViteHmrWebSocketError(msg, stack, filename)) {
           event.preventDefault();
         }
       });
