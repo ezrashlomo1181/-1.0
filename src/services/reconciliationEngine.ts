@@ -1,4 +1,4 @@
-import { Transaction } from '../types/financial';
+import { Transaction, SourceRecord, DuplicateCandidate } from '../types/financial';
 
 export interface ReconciliationReport {
   reconciledTransactions: Transaction[];
@@ -6,6 +6,62 @@ export interface ReconciliationReport {
   matchedDetailedTransactionsCount: number;
   unmatchedSettlementsCount: number;
   reconciliationNotes: string[];
+}
+
+/**
+ * Restore original transactions from a merged transaction (full Unmerge).
+ * Returns the separated transactions in their pristine accounting state.
+ */
+export function unmergeTransaction(mergedTx: Transaction): Transaction[] {
+  // If no mergeHistory snapshot exists, return the transaction as is
+  if (!mergedTx.mergeHistory || mergedTx.mergeHistory.length === 0) {
+    return [mergedTx];
+  }
+
+  // The earliest or most complete snapshot contains the pristine original transactions
+  const latestSnapshot = mergedTx.mergeHistory[mergedTx.mergeHistory.length - 1];
+  if (latestSnapshot.originalTransactions && latestSnapshot.originalTransactions.length > 0) {
+    return latestSnapshot.originalTransactions.map((orig) => {
+      const restored: Transaction = {
+        ...orig,
+        // Ensure not marked as merged or needing verification from old state
+        idempotencyKey: orig.idempotencyKey || (orig.sourceRecords?.[0]?.idempotencyKey),
+      };
+      return restored;
+    });
+  }
+
+  // Fallback: reconstruct from sourceRecords if snapshot was empty
+  if (mergedTx.sourceRecords && mergedTx.sourceRecords.length > 1) {
+    return mergedTx.sourceRecords.map((sr) => {
+      const restoredTx: Transaction = {
+        id: sr.id || `tx-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+        date: sr.date,
+        originalDate: sr.originalDate || sr.date,
+        amount: sr.amount,
+        currency: 'ILS',
+        merchant: sr.merchant || mergedTx.merchant,
+        description: sr.description || mergedTx.description,
+        accountId: sr.accountId || mergedTx.accountId,
+        accountName: sr.accountName || mergedTx.accountName,
+        paymentMethod: sr.paymentMethod || mergedTx.paymentMethod,
+        category: mergedTx.category,
+        type: mergedTx.type,
+        isRecurring: mergedTx.isRecurring,
+        confidenceScore: 1,
+        confidenceLevel: 'high',
+        needsReview: false,
+        userConfirmed: true,
+        sourceDocument: sr.sourceDocument,
+        sourceDocumentType: sr.sourceDocumentType,
+        sourceRecords: [sr],
+        idempotencyKey: sr.idempotencyKey,
+      };
+      return restoredTx;
+    });
+  }
+
+  return [mergedTx];
 }
 
 /**

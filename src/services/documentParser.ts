@@ -1,6 +1,14 @@
 import * as XLSX from 'xlsx';
 import JSZip from 'jszip';
-import { Transaction, TransactionType, ConfidenceLevel, LearnedRule } from '../types/financial';
+import {
+  Transaction,
+  TransactionType,
+  ConfidenceLevel,
+  LearnedRule,
+  SourceRecord,
+  MergeHistorySnapshot,
+  DuplicateCandidate,
+} from '../types/financial';
 import { getStoredLearnedRules } from './storage';
 import {
   classifyTransactionSemantics,
@@ -10,6 +18,89 @@ import {
   identifyDocumentRole,
   reconcileCrossDocumentTransactions,
 } from './reconciliationEngine';
+
+/**
+ * Generate a deterministic idempotency key for a source record row.
+ * Does NOT rely on filename or row number.
+ * Uses normalized date, rounded amount, currency, normalized merchant, account ID, reference, and occurrence index.
+ */
+export function generateRowIdempotencyKey(params: {
+  date: string;
+  amount: number;
+  merchant?: string;
+  ref?: string;
+  accountId?: string;
+  currency?: string;
+  occurrence?: number;
+}): string {
+  const normDate = (params.date || '').trim();
+  const normAmt = (Math.round(Math.abs(params.amount || 0) * 100) / 100).toFixed(2);
+  const normMerchant = (params.merchant || '')
+    .toLowerCase()
+    .replace(/["'״׳\-–_.,()/\\:;#]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const normRef = (params.ref || '')
+    .trim()
+    .replace(/[^0-9a-zA-Z]/g, '');
+  const normAcc = (params.accountId || '').trim().toLowerCase();
+  const normCurr = (params.currency || 'ILS').trim().toUpperCase();
+  const occSuffix = params.occurrence && params.occurrence > 1 ? `:occ_${params.occurrence}` : '';
+
+  // If a reliable reference exists, it is primary evidence alongside date and amount
+  if (normRef.length >= 3) {
+    return `idem:ref:${normRef}_${normAmt}_${normCurr}_${normAcc}${occSuffix}`;
+  }
+
+  // Content-based idempotent fingerprint
+  return `idem:fp:${normDate}_${normAmt}_${normCurr}_${normMerchant}_${normAcc}${occSuffix}`;
+}
+
+/**
+ * Returns the base idempotency key without the occurrence suffix (:occ_X).
+ */
+export function getBaseIdempotencyKey(key?: string): string {
+  if (!key) return '';
+  return key.replace(/:occ_\d+$/, '');
+}
+
+/**
+ * Ensures stable occurrence indexing for a list of transactions.
+ * If multiple transactions have identical content fingerprints,
+ * occurrences are indexed deterministically: occurrence 1 has base key, occurrence 2 has :occ_2, etc.
+ */
+export function assignTransactionOccurrences(txs: Transaction[]): Transaction[] {
+  const occurrenceTracker = new Map<string, number>();
+
+  for (const tx of txs) {
+    let baseKey = getBaseIdempotencyKey(tx.idempotencyKey);
+    if (!baseKey) {
+      baseKey = generateRowIdempotencyKey({
+        date: tx.date,
+        amount: tx.amount,
+        merchant: tx.merchant,
+        accountId: tx.accountId,
+        currency: tx.currency,
+      });
+    }
+
+    const currentOcc = (occurrenceTracker.get(baseKey) || 0) + 1;
+    occurrenceTracker.set(baseKey, currentOcc);
+
+    const stableKey = currentOcc > 1 ? `${baseKey}:occ_${currentOcc}` : baseKey;
+    tx.idempotencyKey = stableKey;
+
+    if (tx.sourceRecords && tx.sourceRecords.length > 0) {
+      for (const sr of tx.sourceRecords) {
+        if (!sr.idempotencyKey || sr.idempotencyKey === baseKey || sr.idempotencyKey.startsWith(baseKey)) {
+          sr.idempotencyKey = stableKey;
+        }
+      }
+    }
+  }
+
+  return txs;
+}
 
 export interface ParseResult {
   success: boolean;
@@ -748,6 +839,7 @@ function buildTransactionObject(params: {
   amountIsNegative: boolean;
   institutionInfo: ReturnType<typeof detectInstitution>;
   sourceFileName: string;
+  occurrence?: number;
 }): Transaction {
   const {
     date,
@@ -762,6 +854,7 @@ function buildTransactionObject(params: {
     amountIsNegative,
     institutionInfo,
     sourceFileName,
+    occurrence,
   } = params;
 
   const isCreditCardSource =
@@ -815,15 +908,44 @@ function buildTransactionObject(params: {
   // Future-date detection relative to current system date (October 8, 2026)
   const isFuture = Boolean(date && date > '2026-10-08');
 
+  const roundedAmount = Math.round(amount * 100) / 100;
+  const initialTxId = `tx-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+  const fullDesc = ref ? `${merchant} (אסמכתא: ${ref})` : (description || merchant);
+  const rowIdempotency = generateRowIdempotencyKey({
+    date,
+    amount: roundedAmount,
+    merchant,
+    ref,
+    accountId: institutionInfo.accountId,
+    currency: 'ILS',
+    occurrence,
+  });
+
+  const initialSourceRecord: SourceRecord = {
+    id: `src-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+    sourceDocument: sourceFileName,
+    sourceDocumentType: docRole,
+    amount: roundedAmount,
+    date,
+    originalDate: date,
+    description: fullDesc,
+    merchant: merchant || 'עסקה ללא שם',
+    accountId: institutionInfo.accountId,
+    accountName: institutionInfo.accountName,
+    paymentMethod: institutionInfo.defaultPayment,
+    importedAt: new Date().toISOString(),
+    idempotencyKey: rowIdempotency,
+  };
+
   return {
-    id: `tx-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`,
+    id: initialTxId,
     date,
     originalDate: date,
     billingDate: billingDate || undefined,
-    amount: Math.round(amount * 100) / 100,
+    amount: roundedAmount,
     currency: 'ILS',
     merchant: merchant || 'עסקה ללא שם',
-    description: ref ? `${merchant} (אסמכתא: ${ref})` : (description || merchant),
+    description: fullDesc,
     accountId: institutionInfo.accountId,
     accountName: institutionInfo.accountName,
     paymentMethod: institutionInfo.defaultPayment,
@@ -839,6 +961,8 @@ function buildTransactionObject(params: {
     sourceDocument: sourceFileName,
     sourceDocumentType: docRole,
     isFuture,
+    idempotencyKey: rowIdempotency,
+    sourceRecords: [initialSourceRecord],
   };
 }
 
@@ -859,6 +983,7 @@ export function extractTransactionsFromRawRows(
   const detectedInst = defaultInstitutionName || institutionInfo.name;
 
   const allTransactions: Transaction[] = [];
+  const rowOccurrenceTracker = new Map<string, number>();
 
   let activeDateCol = -1;
   let activeBillingDateCol = -1;
@@ -1125,6 +1250,17 @@ export function extractTransactionsFromRawRows(
 
     if (!foundValidAmount || txAmount === 0) continue;
 
+    const baseSig = generateRowIdempotencyKey({
+      date: normalizedDate,
+      amount: txAmount,
+      merchant: rawDesc || rawCategory || 'עסקה ללא פירוט',
+      ref: rawRef,
+      accountId: institutionInfo.accountId,
+      currency: 'ILS',
+    });
+    const currentOcc = (rowOccurrenceTracker.get(baseSig) || 0) + 1;
+    rowOccurrenceTracker.set(baseSig, currentOcc);
+
     const tx = buildTransactionObject({
       date: normalizedDate,
       billingDate: normalizedBillingDate,
@@ -1138,6 +1274,7 @@ export function extractTransactionsFromRawRows(
       amountIsNegative,
       institutionInfo,
       sourceFileName,
+      occurrence: currentOcc,
     });
 
     allTransactions.push(tx);
@@ -2418,7 +2555,12 @@ export async function parseFinancialDocument(file: File): Promise<ParseResult> {
 export function deduplicateTransactions(
   existingTxs: Transaction[],
   newTxs: Transaction[]
-): { uniqueTxs: Transaction[]; duplicatesCount: number; updatedExistingTxs?: Transaction[] } {
+): {
+  uniqueTxs: Transaction[];
+  duplicatesCount: number;
+  updatedExistingTxs: Transaction[];
+  candidatesForReview?: DuplicateCandidate[];
+} {
   const normalizeMerchant = (m: string) =>
     (m || '')
       .toLowerCase()
@@ -2427,124 +2569,384 @@ export function deduplicateTransactions(
       .replace(/\s+/g, ' ')
       .trim();
 
-  // Index existing transactions
-  const strongMap = new Map<string, Transaction>();
+  // Helper to extract clean reference code if any
+  const extractRef = (tx: Transaction): string => {
+    const raw = `${tx.description || ''} ${tx.rawText || ''}`;
+    const m = raw.match(/אסמכתא[:\s]+([0-9a-zA-Z\-_/]+)/);
+    if (m && m[1]) return m[1].replace(/[^0-9a-zA-Z]/g, '');
+    const m2 = raw.match(/ref[:\s]+([0-9a-zA-Z\-_/]+)/i);
+    if (m2 && m2[1]) return m2[1].replace(/[^0-9a-zA-Z]/g, '');
+    return '';
+  };
+
+  // Helper: check if transaction represents a refund/credit
+  const isRefundOrCredit = (t: Transaction): boolean => {
+    return t.type === 'refund' || t.category === 'החזרים וזיכויים' || t.amount < 0;
+  };
+
+  // Helper: check if two document names indicate copies of the same document
+  const isSameSourceDocument = (docA?: string, docB?: string): boolean => {
+    if (!docA || !docB) return false;
+    if (docA === docB) return true;
+    const clean = (name: string) =>
+      name
+        .toLowerCase()
+        .replace(/\.[a-z0-9]+$/i, '')
+        .replace(/[\s_\-]*copy[\s_\-]*\d*/gi, '')
+        .replace(/[\s_\-]*\(\d+\)/g, '')
+        .replace(/[\s_\-]*duplicate/gi, '')
+        .replace(/[\s_\-]*עותק/gi, '')
+        .replace(/[\s_\-]+\d+$/g, '')
+        .trim();
+    const cA = clean(docA);
+    const cB = clean(docB);
+    return Boolean(cA && cB && cA === cB);
+  };
+
+  // Shallow copy existing transactions to allow non-destructive updates
+  const updatedExisting: Transaction[] = existingTxs.map((t) => ({ ...t }));
+
+  // 1. Index existing transactions by IdempotencyKey, References, and Date+Amount
+  const existingIdempotencySet = new Set<string>();
+  const existingIdempotencyMap = new Map<string, Transaction>();
+  const existingRefMap = new Map<string, Transaction[]>();
   const dateAmountMap = new Map<string, Transaction[]>();
-  const billingAmountMap = new Map<string, Transaction[]>();
+  const strongMap = new Map<string, Transaction[]>();
+  const existingOccTracker = new Map<string, number>();
 
-  for (const t of existingTxs) {
-    const normM = normalizeMerchant(t.merchant);
-    const amtStr = t.amount.toFixed(2);
-    const key = `${t.date}_${amtStr}_${normM}`;
-    strongMap.set(key, t);
+  for (const t of updatedExisting) {
+    let key = t.idempotencyKey;
+    if (key) {
+      const baseKey = getBaseIdempotencyKey(key);
+      const occ = (existingOccTracker.get(baseKey) || 0) + 1;
+      existingOccTracker.set(baseKey, occ);
 
-    const daKey = `${t.date}_${amtStr}`;
-    if (!dateAmountMap.has(daKey)) {
-      dateAmountMap.set(daKey, []);
+      // If an existing transaction didn't have an occurrence suffix but appears multiple times:
+      if (occ > 1 && !key.includes(':occ_')) {
+        key = `${baseKey}:occ_${occ}`;
+        t.idempotencyKey = key;
+        if (t.sourceRecords && t.sourceRecords[0]) {
+          t.sourceRecords[0].idempotencyKey = key;
+        }
+      }
+
+      existingIdempotencySet.add(key);
+      existingIdempotencyMap.set(key, t);
     }
+    if (t.sourceRecords) {
+      for (const sr of t.sourceRecords) {
+        if (sr.idempotencyKey) {
+          existingIdempotencySet.add(sr.idempotencyKey);
+          existingIdempotencyMap.set(sr.idempotencyKey, t);
+        }
+      }
+    }
+
+    // Register reference
+    const ref = extractRef(t);
+    if (ref && ref.length >= 3) {
+      if (!existingRefMap.has(ref)) existingRefMap.set(ref, []);
+      existingRefMap.get(ref)!.push(t);
+    }
+
+    // Register by date and amount
+    const amtStr = Math.abs(t.amount).toFixed(2);
+    const daKey = `${t.date}_${amtStr}`;
+    if (!dateAmountMap.has(daKey)) dateAmountMap.set(daKey, []);
     dateAmountMap.get(daKey)!.push(t);
 
-    if (t.billingDate) {
-      const bKey = `${t.billingDate}_${amtStr}`;
-      if (!billingAmountMap.has(bKey)) {
-        billingAmountMap.set(bKey, []);
-      }
-      billingAmountMap.get(bKey)!.push(t);
-    }
+    // Register by strong triple (date + amount + normalized merchant)
+    const normM = normalizeMerchant(t.merchant);
+    const strongKey = `${t.date}_${amtStr}_${normM}`;
+    if (!strongMap.has(strongKey)) strongMap.set(strongKey, []);
+    strongMap.get(strongKey)!.push(t);
   }
+
+  // Ensure deterministic occurrence indexing for incoming batch of transactions
+  assignTransactionOccurrences(newTxs);
 
   const uniqueTxs: Transaction[] = [];
   let duplicatesCount = 0;
+  const candidatesForReview: DuplicateCandidate[] = [];
 
-  for (const t of newTxs) {
-    const normM = normalizeMerchant(t.merchant);
-    const amtStr = t.amount.toFixed(2);
-    const strongKey = `${t.date}_${amtStr}_${normM}`;
+  for (const incoming of newTxs) {
+    // 0. Ensure incoming transaction has valid sourceRecords
+    if (!incoming.sourceRecords || incoming.sourceRecords.length === 0) {
+      const initSrc: SourceRecord = {
+        id: `src-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`,
+        sourceDocument: incoming.sourceDocument || 'ייבוא',
+        sourceDocumentType: incoming.sourceDocumentType,
+        amount: incoming.amount,
+        date: incoming.date,
+        originalDate: incoming.originalDate || incoming.date,
+        description: incoming.description,
+        merchant: incoming.merchant,
+        accountId: incoming.accountId,
+        accountName: incoming.accountName,
+        paymentMethod: incoming.paymentMethod,
+        importedAt: new Date().toISOString(),
+        idempotencyKey: incoming.idempotencyKey,
+      };
+      incoming.sourceRecords = [initSrc];
+    }
+    const incomingSourceRecord = incoming.sourceRecords[0];
+    const incomingIdemKey = incoming.idempotencyKey || incomingSourceRecord?.idempotencyKey;
 
-    // Helper: merge metadata into canonical record
-    const mergeIntoCanonical = (target: Transaction, source: Transaction) => {
-      duplicatesCount++;
-      if (source.sourceDocument && source.sourceDocument !== target.sourceDocument) {
-        if (!target.additionalSources) target.additionalSources = [];
-        if (!target.additionalSources.includes(source.sourceDocument)) {
-          target.additionalSources.push(source.sourceDocument);
+    // RULE 1: Exact idempotency hit (re-import of exact identical source row from same document)
+    if (incomingIdemKey && existingIdempotencySet.has(incomingIdemKey)) {
+      const target = existingIdempotencyMap.get(incomingIdemKey);
+      const isRefKey = incomingIdemKey.startsWith('idem:ref:');
+      const isSameDoc = isSameSourceDocument(incoming.sourceDocument, target?.sourceDocument);
+
+      // Proven re-import of the SAME document (or copy of it):
+      if (isSameDoc) {
+        duplicatesCount++;
+        if (target) {
+          // Safe enrichment of document name if from another file copy
+          if (incoming.sourceDocument && target.sourceDocument !== incoming.sourceDocument) {
+            if (!target.additionalSources) target.additionalSources = [];
+            if (!target.additionalSources.includes(incoming.sourceDocument)) {
+              target.additionalSources.push(incoming.sourceDocument);
+            }
+          }
+        }
+        continue;
+      } else if (!isRefKey) {
+        // Different document without reference!
+        // Requirement 3: Do NOT automatically drop it! Keep as distinct transaction and flag for review.
+        incoming.needsReview = true;
+        incoming.reviewReason = `נמצאה עסקה מקבילה במסמך אחר (${target?.sourceDocument || 'מסמך קיים'}) בסכום ₪${Math.abs(incoming.amount).toFixed(2)} בתאריך זה ללא אסמכתא – נשמרה בנפרד לבדיקת משתמש`;
+        if (target) {
+          candidatesForReview.push({
+            existingTransactionId: target.id,
+            incomingRecord: incomingSourceRecord,
+            confidenceScore: 0.6,
+            matchType: 'competing_candidate',
+            reasons: [`עסקה זהה בסכום ובתאריך במסמך חופף (${incoming.sourceDocument} מול ${target.sourceDocument}) ללא אסמכתא`],
+            suggestedAction: 'review_required',
+          });
         }
       }
-      if (source.billingDate && !target.billingDate) {
-        target.billingDate = source.billingDate;
-      }
-      // If new transaction has a longer/richer merchant name, update it
-      if (source.merchant.length > target.merchant.length && target.merchant.includes('עסקה ללא')) {
-        target.merchant = source.merchant;
-        target.description = source.description;
-      }
-    };
-
-    // 1. Direct strong match (identical date + amount + normalized merchant)
-    if (strongMap.has(strongKey)) {
-      const existing = strongMap.get(strongKey)!;
-      mergeIntoCanonical(existing, t);
-      continue;
+      // If isRefKey and from a different document, fall through to Evidence Path A to preserve merge provenance!
     }
 
-    // 2. Strong candidate match on date and amount (merchant substring or containment)
-    const daKey = `${t.date}_${amtStr}`;
-    const candidates = dateAmountMap.get(daKey);
-    let matchedCandidate: Transaction | null = null;
+    // RULE 2: Prevent merging a refund/credit into an expense or vice versa!
+    // A refund offsets an expense, it is NEVER a duplicate copy.
+    const incomingIsRefund = isRefundOrCredit(incoming);
 
-    if (candidates && candidates.length > 0) {
-      for (const cand of candidates) {
-        const candM = normalizeMerchant(cand.merchant);
-        if (
-          candM === normM ||
-          (candM.length > 2 && normM.length > 2 && (candM.includes(normM) || normM.includes(candM))) ||
-          // Generic merchant name matching specific merchant
-          ((candM.includes('עסקה') || candM.includes('תשלום') || candM.includes('חיוב')) && normM.length > 2)
-        ) {
-          matchedCandidate = cand;
-          break;
+    const incomingAmtStr = Math.abs(incoming.amount).toFixed(2);
+    const incomingNormM = normalizeMerchant(incoming.merchant);
+    const incomingRef = extractRef(incoming);
+
+    // Collect merge candidates with clear evidence
+    let matchedTarget: Transaction | null = null;
+    let matchReason = '';
+    let matchConfidence = 0;
+
+    // EVIDENCE PATH A: Reliable Reference Code (אסמכתא)
+    if (incomingRef && incomingRef.length >= 3 && existingRefMap.has(incomingRef)) {
+      const refMatches = existingRefMap.get(incomingRef)!;
+      // Filter out opposing sign (refund vs expense) AND filter out same document rows
+      const compatibleMatches = refMatches.filter((m) => {
+        if (m.sourceDocument && incoming.sourceDocument && m.sourceDocument === incoming.sourceDocument) {
+          return false;
         }
+        return isRefundOrCredit(m) === incomingIsRefund;
+      });
+      if (compatibleMatches.length === 1) {
+        // High confidence 1-to-1 match via reference
+        const cand = compatibleMatches[0];
+        if (Math.abs(cand.amount - incoming.amount) < 0.01) {
+          matchedTarget = cand;
+          matchReason = `התאמה מלאה באסמכתא משותפת (${incomingRef}) וסכום זהה`;
+          matchConfidence = 0.98;
+        }
+      } else if (compatibleMatches.length > 1) {
+        // Competing candidates with the same reference! DO NOT arbitrarily choose.
+        incoming.needsReview = true;
+        incoming.reviewReason = `זוהו מספר עסקאות עם אותה אסמכתא (${incomingRef}) – נדרשת בדיקה ידנית`;
+        candidatesForReview.push({
+          existingTransactionId: compatibleMatches[0].id,
+          incomingRecord: incomingSourceRecord,
+          confidenceScore: 0.5,
+          matchType: 'competing_candidate',
+          reasons: [`קיימים ${compatibleMatches.length} מועמדים מתחרים בעלי אותה אסמכתא`],
+          suggestedAction: 'review_required',
+        });
       }
     }
 
-    // 3. Billing date match candidate
-    if (!matchedCandidate && t.billingDate) {
-      const bKey = `${t.billingDate}_${amtStr}`;
-      const bCandidates = billingAmountMap.get(bKey);
-      if (bCandidates && bCandidates.length > 0) {
-        for (const cand of bCandidates) {
-          const candM = normalizeMerchant(cand.merchant);
-          if (candM === normM || (candM.length > 2 && normM.length > 2 && (candM.includes(normM) || normM.includes(candM)))) {
-            matchedCandidate = cand;
-            break;
+    // EVIDENCE PATH B: Cross-Document Merge between Debit and Bank Account
+    if (!matchedTarget && !incoming.needsReview) {
+      const daKey = `${incoming.date}_${incomingAmtStr}`;
+      const daCandidates = (dateAmountMap.get(daKey) || []).filter(
+        (c) => isRefundOrCredit(c) === incomingIsRefund
+      );
+
+      if (daCandidates.length > 0) {
+        const strongMatches = daCandidates.filter((cand) => {
+          // Rule: Two transactions from the SAME document can NEVER be cross-document merged!
+          if (cand.sourceDocument && incoming.sourceDocument && cand.sourceDocument === incoming.sourceDocument) {
+            return false;
+          }
+
+          const candNormM = normalizeMerchant(cand.merchant);
+          const isDebitVsBank =
+            (incoming.sourceDocumentType === 'credit_card_statement' && cand.sourceDocumentType === 'bank_statement') ||
+            (incoming.sourceDocumentType === 'bank_statement' && cand.sourceDocumentType === 'credit_card_statement');
+
+          // Strict evidence check: either debit-vs-bank with generic bank title or cross-document invoice/statement
+          const genericBankDebit =
+            isDebitVsBank &&
+            (candNormM.includes('חיוב כרטיס') ||
+              candNormM.includes('עסקה') ||
+              candNormM.includes('דביט') ||
+              candNormM.includes('תשלום') ||
+              incomingNormM.includes('חיוב כרטיס') ||
+              incomingNormM.includes('דביט'));
+
+          const isDetailedVsStatement =
+            ((incoming.sourceDocumentType === 'detailed_report' && (cand.sourceDocumentType === 'bank_statement' || cand.sourceDocumentType === 'credit_card_statement')) ||
+             (cand.sourceDocumentType === 'detailed_report' && (incoming.sourceDocumentType === 'bank_statement' || incoming.sourceDocumentType === 'credit_card_statement'))) &&
+            candNormM === incomingNormM;
+
+          return (isDebitVsBank && (candNormM === incomingNormM || genericBankDebit)) || isDetailedVsStatement;
+        });
+
+        if (strongMatches.length === 1) {
+          // Exactly one candidate meets the evidence threshold
+          matchedTarget = strongMatches[0];
+          matchReason = `הצלבת מסמכים מאומתת (${matchedTarget.sourceDocumentType || 'בנק'} מול ${incoming.sourceDocumentType || 'פירוט'})`;
+          matchConfidence = 0.92;
+        } else if (strongMatches.length > 1) {
+          // Multiple competing candidates exist! Refuse arbitrary merge.
+          incoming.needsReview = true;
+          incoming.reviewReason = `נמצאו ${strongMatches.length} עסקאות מתחרות באותו תאריך וסכום – נדרשת בדיקת משתמש`;
+          candidatesForReview.push({
+            existingTransactionId: strongMatches[0].id,
+            incomingRecord: incomingSourceRecord,
+            confidenceScore: 0.5,
+            matchType: 'competing_candidate',
+            reasons: [`קיימים ${strongMatches.length} מועמדים מתחרים עם תאריך וסכום זהים`],
+            suggestedAction: 'review_required',
+          });
+        } else {
+          // Candidates exist by date and amount across DIFFERENT documents, but NO verified proof of identical transaction
+          // Keep both separate as genuine distinct transactions and flag for user review!
+          const crossDocCandidates = daCandidates.filter(
+            (c) => c.sourceDocument && incoming.sourceDocument && c.sourceDocument !== incoming.sourceDocument
+          );
+          if (crossDocCandidates.length > 0) {
+            incoming.needsReview = true;
+            incoming.reviewReason = `נמצאה עסקה מקבילה במסמך אחר בסכום ₪${Math.abs(incoming.amount).toFixed(2)} בתאריך זה (${crossDocCandidates[0].merchant}) – נשמרה בנפרד לאימות`;
           }
         }
       }
     }
 
-    if (matchedCandidate) {
-      mergeIntoCanonical(matchedCandidate, t);
-    } else {
-      // 4. Conservative review check: if same date and amount exist but distinct merchants
-      if (candidates && candidates.length > 0) {
-        // Keep both records to avoid dropping legitimate distinct transactions!
-        t.needsReview = true;
-        t.reviewReason = `נמצאה עסקה נוספת בסכום ₪${t.amount} בתאריך זה (${candidates[0].merchant}) – נדרש אימות שאינה כפולה`;
+    // EXECUTE MERGE IF CONFIRMED WITH UNAMBIGUOUS EVIDENCE
+    if (matchedTarget) {
+      duplicatesCount++;
+
+      // Create pre-merge snapshot for full Unmerge support
+      const preMergeSnapshot: MergeHistorySnapshot = {
+        mergedAt: new Date().toISOString(),
+        reason: matchReason,
+        confidenceScore: matchConfidence,
+        originalTransactions: [
+          JSON.parse(JSON.stringify(matchedTarget)),
+          JSON.parse(JSON.stringify(incoming)),
+        ],
+      };
+
+      if (!matchedTarget.mergeHistory) matchedTarget.mergeHistory = [];
+      matchedTarget.mergeHistory.push(preMergeSnapshot);
+
+      // Preserve provenance: append sourceRecords
+      if (!matchedTarget.sourceRecords) {
+        matchedTarget.sourceRecords = [
+          {
+            id: `src-${matchedTarget.id}`,
+            sourceDocument: matchedTarget.sourceDocument || 'קובץ קיים',
+            sourceDocumentType: matchedTarget.sourceDocumentType,
+            amount: matchedTarget.amount,
+            date: matchedTarget.date,
+            originalDate: matchedTarget.originalDate || matchedTarget.date,
+            description: matchedTarget.description,
+            merchant: matchedTarget.merchant,
+            accountId: matchedTarget.accountId,
+            accountName: matchedTarget.accountName,
+            paymentMethod: matchedTarget.paymentMethod,
+            importedAt: new Date().toISOString(),
+            idempotencyKey: matchedTarget.idempotencyKey,
+          },
+        ];
       }
 
-      strongMap.set(strongKey, t);
-      if (!dateAmountMap.has(daKey)) {
-        dateAmountMap.set(daKey, []);
+      // Add incoming record
+      matchedTarget.sourceRecords.push(incomingSourceRecord);
+
+      // Maintain additionalSources list
+      if (incoming.sourceDocument && matchedTarget.sourceDocument !== incoming.sourceDocument) {
+        if (!matchedTarget.additionalSources) matchedTarget.additionalSources = [];
+        if (!matchedTarget.additionalSources.includes(incoming.sourceDocument)) {
+          matchedTarget.additionalSources.push(incoming.sourceDocument);
+        }
       }
-      dateAmountMap.get(daKey)!.push(t);
-      if (t.billingDate) {
-        const bKey = `${t.billingDate}_${amtStr}`;
-        if (!billingAmountMap.has(bKey)) billingAmountMap.set(bKey, []);
-        billingAmountMap.get(bKey)!.push(t);
+
+      // Enrich merchant/description if incoming is more specific
+      if (
+        incoming.merchant &&
+        (matchedTarget.merchant.includes('עסקה ללא') ||
+          matchedTarget.merchant.includes('חיוב כרטיס') ||
+          matchedTarget.merchant === 'עסקה') &&
+        incoming.merchant.length > 3
+      ) {
+        matchedTarget.merchant = incoming.merchant;
+        matchedTarget.description = incoming.description;
+        matchedTarget.category = incoming.category;
+        if (matchedTarget.needsReview && matchedTarget.reviewReason?.includes('חיוב כרטיס אשראי מרוכז')) {
+          matchedTarget.needsReview = false;
+          matchedTarget.reviewReason = undefined;
+        }
       }
-      uniqueTxs.push(t);
+
+      if (incoming.billingDate && !matchedTarget.billingDate) {
+        matchedTarget.billingDate = incoming.billingDate;
+      }
+
+      // Register incoming idempotency key under target
+      if (incomingIdemKey) {
+        existingIdempotencySet.add(incomingIdemKey);
+        existingIdempotencyMap.set(incomingIdemKey, matchedTarget);
+      }
+    } else {
+      // KEEP AS DISTINCT TRANSACTION
+      uniqueTxs.push(incoming);
+
+      // Index newly admitted transaction into maps for subsequent rows in this batch
+      if (incomingIdemKey) {
+        existingIdempotencySet.add(incomingIdemKey);
+        existingIdempotencyMap.set(incomingIdemKey, incoming);
+      }
+      if (incomingRef && incomingRef.length >= 3) {
+        if (!existingRefMap.has(incomingRef)) existingRefMap.set(incomingRef, []);
+        existingRefMap.get(incomingRef)!.push(incoming);
+      }
+      const daKey = `${incoming.date}_${incomingAmtStr}`;
+      if (!dateAmountMap.has(daKey)) dateAmountMap.set(daKey, []);
+      dateAmountMap.get(daKey)!.push(incoming);
+
+      const strongKey = `${incoming.date}_${incomingAmtStr}_${incomingNormM}`;
+      if (!strongMap.has(strongKey)) strongMap.set(strongKey, []);
+      strongMap.get(strongKey)!.push(incoming);
     }
   }
 
-  return { uniqueTxs, duplicatesCount, updatedExistingTxs: existingTxs };
+  return {
+    uniqueTxs,
+    duplicatesCount,
+    updatedExistingTxs: updatedExisting,
+    candidatesForReview,
+  };
 }

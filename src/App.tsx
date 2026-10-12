@@ -29,7 +29,7 @@ import {
   FinancialCycleConfig,
 } from './types/financial';
 import { deduplicateTransactions, parseFinancialDocument } from './services/documentParser';
-import { reconcileCrossDocumentTransactions } from './services/reconciliationEngine';
+import { reconcileCrossDocumentTransactions, unmergeTransaction } from './services/reconciliationEngine';
 import { Sidebar, NavSection } from './components/Sidebar';
 import { Header } from './components/Header';
 import { VerificationModal } from './components/VerificationModal';
@@ -367,7 +367,7 @@ export default function App() {
         ...prev,
         accounts: newAccounts,
         documents: [newDoc, ...prev.documents],
-        transactions: combinedTxs,
+        transactions: reconciledTransactions,
         dataQuality: {
           ...prev.dataQuality,
           overallScore: Math.min(100, Math.max(prev.dataQuality.overallScore, 40) + Math.min(25, uniqueTxs.length * 2)),
@@ -376,16 +376,49 @@ export default function App() {
     });
   };
 
-  // Real document deletion
+  // Real document deletion with graceful unmerge of any transactions merged with this document
   const handleDeleteDocument = (docId: string, fileName: string) => {
     setState((prev) => {
       const remainingDocs = prev.documents.filter((d) => d.id !== docId);
-      const remainingTxs = prev.transactions.filter((tx) => tx.sourceDocument !== fileName);
+
+      const nextTxs: Transaction[] = [];
+      for (const tx of prev.transactions) {
+        const hasMainDoc = tx.sourceDocument === fileName;
+        const hasAdditionalDoc = tx.additionalSources && tx.additionalSources.includes(fileName);
+        const hasSourceRecord = tx.sourceRecords && tx.sourceRecords.some((sr) => sr.sourceDocument === fileName);
+
+        // Case 1: Transaction belongs entirely to deleted file and has NO other sources
+        if (hasMainDoc && !hasAdditionalDoc && (!tx.sourceRecords || tx.sourceRecords.length <= 1)) {
+          continue; // Delete transaction
+        }
+
+        // Case 2: Transaction had been merged across multiple documents
+        if (hasMainDoc || hasAdditionalDoc || hasSourceRecord) {
+          // Unmerge to restore separated transactions
+          const restored = unmergeTransaction(tx);
+          // Keep only restored parts that do NOT belong to the deleted file
+          for (const r of restored) {
+            if (r.sourceDocument !== fileName) {
+              // Strip deleted file from additionalSources if present
+              const cleanedAdditional = r.additionalSources?.filter((s) => s !== fileName);
+              const cleanedSources = r.sourceRecords?.filter((sr) => sr.sourceDocument !== fileName);
+              nextTxs.push({
+                ...r,
+                additionalSources: cleanedAdditional && cleanedAdditional.length > 0 ? cleanedAdditional : undefined,
+                sourceRecords: cleanedSources && cleanedSources.length > 0 ? cleanedSources : undefined,
+              });
+            }
+          }
+        } else {
+          // Case 3: Completely unrelated transaction, keep as is
+          nextTxs.push(tx);
+        }
+      }
 
       return {
         ...prev,
         documents: remainingDocs,
-        transactions: remainingTxs,
+        transactions: nextTxs,
         dataQuality: {
           ...prev.dataQuality,
           overallScore: Math.max(25, prev.dataQuality.overallScore - 3),

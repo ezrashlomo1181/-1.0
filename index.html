@@ -13,6 +13,22 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <script>
+      // Ignore WebSocket / HMR disconnection errors in AI Studio iframe environment
+      window.addEventListener('unhandledrejection', function(event) {
+        var reason = event.reason;
+        var msg = (reason && (reason.message || String(reason))) || '';
+        var stack = (reason && reason.stack) || '';
+        if (msg.includes('WebSocket') || stack.includes('@vite/client') || stack.includes('vite')) {
+          event.preventDefault();
+        }
+      });
+      window.addEventListener('error', function(event) {
+        var msg = event.message || '';
+        var filename = event.filename || '';
+        if (msg.includes('WebSocket') || filename.includes('@vite/client')) {
+          event.preventDefault();
+        }
+      });
       (function() {
         try {
           var mode = localStorage.getItem('matzpen_theme_mode') || 'system';
