@@ -1,5 +1,16 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { LearnedRule, UserProfile } from '../types/financial';
+import { AppState } from '../services/storage';
+import {
+  generateBackupPayload,
+  downloadBackupFile,
+  readBackupFile,
+  applyRestore,
+  getPreRestoreSnapshot,
+  rollbackPreRestoreSnapshot,
+  ValidationResult,
+  SnapshotRecord,
+} from '../services/backupService';
 import {
   Settings,
   ShieldCheck,
@@ -15,11 +26,21 @@ import {
   Mail,
   Palette,
   Edit3,
+  Download,
+  Upload,
+  Database,
+  History,
+  CheckCircle2,
+  FileText,
+  AlertCircle,
+  X,
 } from 'lucide-react';
 import { ThemeToggle } from '../components/ThemeToggle';
 import { EditRuleModal } from '../components/EditRuleModal';
 
 interface SettingsViewProps {
+  appState?: AppState;
+  onRestoreState?: (restoredState: AppState) => void;
   learnedRules: LearnedRule[];
   onUpdateRules: (rules: LearnedRule[]) => void;
   onResetDemoData: () => void;
@@ -30,6 +51,8 @@ interface SettingsViewProps {
 }
 
 export const SettingsView: React.FC<SettingsViewProps> = ({
+  appState,
+  onRestoreState,
   learnedRules,
   onUpdateRules,
   onResetDemoData,
@@ -45,6 +68,20 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [confirmDeleteAccount, setConfirmDeleteAccount] = useState(false);
   const [editingRule, setEditingRule] = useState<LearnedRule | null>(null);
 
+  // Backup & Restore states
+  const [backupExportMessage, setBackupExportMessage] = useState<string | null>(null);
+  const [validationResult, setValidationResult] = useState<ValidationResult | null>(null);
+  const [isReadingFile, setIsReadingFile] = useState(false);
+  const [restoreFeedback, setRestoreFeedback] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+  const [preRestoreSnapshot, setPreRestoreSnapshot] = useState<SnapshotRecord | null>(null);
+  const [showRestoreConfirmModal, setShowRestoreConfirmModal] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const snap = getPreRestoreSnapshot(userProfile?.id);
+    setPreRestoreSnapshot(snap);
+  }, [userProfile?.id]);
+
   const handleDeleteRule = (id: string) => {
     const updated = learnedRules.filter((r) => r.id !== id);
     onUpdateRules(updated);
@@ -53,6 +90,85 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const handleSaveEditedRule = (updatedRule: LearnedRule) => {
     const updated = learnedRules.map((r) => (r.id === updatedRule.id ? updatedRule : r));
     onUpdateRules(updated);
+  };
+
+  const handleExportBackup = () => {
+    if (!appState) return;
+    try {
+      const payload = generateBackupPayload(appState, userProfile);
+      downloadBackupFile(payload);
+      setBackupExportMessage(
+        `קובץ הגיבוי הורד בהצלחה! (${payload.metadata.summary.transactionsCount} עסקאות, ${payload.metadata.summary.accountsCount} חשבונות)`
+      );
+      setTimeout(() => setBackupExportMessage(null), 5000);
+    } catch (e: any) {
+      setRestoreFeedback({ type: 'error', text: `שגיאה בייצוא: ${e.message || 'שגיאה לא ידועה'}` });
+    }
+  };
+
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setIsReadingFile(true);
+    setRestoreFeedback(null);
+    try {
+      const { result } = await readBackupFile(file);
+      setValidationResult(result);
+      if (result.isValid) {
+        setShowRestoreConfirmModal(true);
+      } else {
+        setRestoreFeedback({
+          type: 'error',
+          text: result.errors.join(' | ') || 'קובץ הגיבוי שנבחר אינו תקין.',
+        });
+      }
+    } catch (err: any) {
+      setRestoreFeedback({ type: 'error', text: err.message || 'שגיאה בקריאת הקובץ.' });
+    } finally {
+      setIsReadingFile(false);
+      e.target.value = '';
+    }
+  };
+
+  const handleConfirmRestore = () => {
+    if (!validationResult?.parsedPayload || !appState) return;
+    try {
+      const res = applyRestore(validationResult.parsedPayload, appState, userProfile?.id);
+      if (res.success && res.restoredState) {
+        onRestoreState?.(res.restoredState);
+        setPreRestoreSnapshot(getPreRestoreSnapshot(userProfile?.id));
+        setRestoreFeedback({
+          type: 'success',
+          text: `השחזור הושלם בהצלחה! שוחזרו ${res.restoredState.transactions.length} עסקאות ו-${res.restoredState.accounts.length} חשבונות. נוצר עותק בטיחות לשחזור לאחור.`,
+        });
+        setShowRestoreConfirmModal(false);
+        setValidationResult(null);
+        setTimeout(() => setRestoreFeedback(null), 6000);
+      } else {
+        setRestoreFeedback({ type: 'error', text: res.error || 'שגיאה במהלך השחזור.' });
+      }
+    } catch (e: any) {
+      setRestoreFeedback({ type: 'error', text: `שגיאה במהלך השחזור: ${e.message}` });
+    }
+  };
+
+  const handleRollbackSnapshot = () => {
+    try {
+      const res = rollbackPreRestoreSnapshot(userProfile?.id);
+      if (res.success && res.rolledBackState) {
+        onRestoreState?.(res.rolledBackState);
+        setPreRestoreSnapshot(getPreRestoreSnapshot(userProfile?.id));
+        setRestoreFeedback({
+          type: 'success',
+          text: `בוצע שחזור לאחור בהצלחה! שוחזרו הנתונים שקדמו לשחזור האחרון (${res.rolledBackState.transactions.length} עסקאות).`,
+        });
+        setTimeout(() => setRestoreFeedback(null), 5000);
+      } else {
+        setRestoreFeedback({ type: 'error', text: res.error || 'לא נמצא עותק בטיחות לשחזור לאחור.' });
+      }
+    } catch (e: any) {
+      setRestoreFeedback({ type: 'error', text: `שגיאה בשחזור לאחור: ${e.message}` });
+    }
   };
 
   const isPendingDeletion = userProfile?.deletionStatus === 'pending_deletion';
@@ -357,7 +473,250 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         )}
       </div>
 
-      {/* 6. PRIVACY & LOCAL TESTING TOOLS */}
+      {/* 6. LOCAL BACKUP & RESTORE */}
+      <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs space-y-4 transition-colors">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+          <h3 className="text-sm font-bold text-[#0F172A] dark:text-white flex items-center gap-2">
+            <Database className="w-4 h-4 text-indigo-600 dark:text-indigo-400" />
+            <span>גיבוי ושחזור נתונים מקומי (JSON)</span>
+          </h3>
+          <span className="text-[11px] font-medium text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 px-2.5 py-1 rounded-md">
+            פרטיות מלאה • עיבוד מקומי בלבד בדפדפן
+          </span>
+        </div>
+
+        <p className="text-xs text-slate-500 dark:text-slate-400 leading-relaxed">
+          באפשרותך לייצא את כל הנתונים הפיננסיים שלך, החשבונות, התקציבים, היעדים, והחוקים שנלמדו לקובץ גיבוי מאובטח במחשבך.
+          לפני כל שחזור מקובץ גיבוי, המערכת תיצור אוטומטית עותק בטיחות מקומי המאפשר שחזור לאחור בכל עת.
+        </p>
+
+        {/* Status Feedbacks */}
+        {backupExportMessage && (
+          <div className="p-3 rounded-lg bg-emerald-50 dark:bg-emerald-950/40 border border-emerald-200 dark:border-emerald-800/80 flex items-center gap-2.5 text-xs text-emerald-800 dark:text-emerald-300">
+            <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            <span>{backupExportMessage}</span>
+          </div>
+        )}
+
+        {restoreFeedback && (
+          <div
+            className={`p-3 rounded-lg border flex items-center gap-2.5 text-xs ${
+              restoreFeedback.type === 'success'
+                ? 'bg-emerald-50 dark:bg-emerald-950/40 border-emerald-200 dark:border-emerald-800/80 text-emerald-800 dark:text-emerald-300'
+                : 'bg-rose-50 dark:bg-rose-950/40 border-rose-200 dark:border-rose-800/80 text-rose-800 dark:text-rose-300'
+            }`}
+          >
+            {restoreFeedback.type === 'success' ? (
+              <CheckCircle2 className="w-4 h-4 text-emerald-600 dark:text-emerald-400 shrink-0" />
+            ) : (
+              <AlertCircle className="w-4 h-4 text-rose-600 dark:text-rose-400 shrink-0" />
+            )}
+            <span>{restoreFeedback.text}</span>
+          </div>
+        )}
+
+        {/* Actions Grid */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5 pt-1">
+          {/* Export Action Card */}
+          <div className="p-4 rounded-lg bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] flex flex-col justify-between gap-3">
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-xs text-[#0F172A] dark:text-white flex items-center gap-1.5">
+                  <Download className="w-3.5 h-3.5 text-indigo-600 dark:text-indigo-400" />
+                  ייצוא גיבוי מלא
+                </span>
+                <span className="text-[10px] text-slate-500 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded">
+                  פורמט JSON
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                מצב נוכחי: {appState?.transactions.length || 0} עסקאות, {appState?.accounts.length || 0} חשבונות, {learnedRules.length} חוקים שמורים.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleExportBackup}
+              className="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer shadow-xs"
+            >
+              <Download className="w-3.5 h-3.5" />
+              <span>הורד קובץ גיבוי</span>
+            </button>
+          </div>
+
+          {/* Restore Action Card */}
+          <div className="p-4 rounded-lg bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-[#1F2937] flex flex-col justify-between gap-3">
+            <div>
+              <div className="flex items-center justify-between">
+                <span className="font-semibold text-xs text-[#0F172A] dark:text-white flex items-center gap-1.5">
+                  <Upload className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                  שחזור מקובץ גיבוי
+                </span>
+                <span className="text-[10px] text-slate-500 bg-white dark:bg-slate-800 border border-slate-200 dark:border-slate-700 px-2 py-0.5 rounded">
+                  בדיקה + אישור
+                </span>
+              </div>
+              <p className="text-[11px] text-slate-500 dark:text-slate-400 mt-1">
+                טעינת נתונים מקובץ גיבוי קיים עם בדיקת תקינות מקיפה לפני החלה.
+              </p>
+            </div>
+
+            <div className="relative">
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                onChange={handleFileChange}
+                disabled={isReadingFile}
+                className="hidden"
+                id="backup-file-input"
+              />
+              <label
+                htmlFor="backup-file-input"
+                className={`w-full py-2 px-3 rounded-lg bg-white dark:bg-slate-800 hover:bg-slate-100 dark:hover:bg-slate-700 text-slate-800 dark:text-slate-200 border border-slate-300 dark:border-slate-700 font-medium text-xs flex items-center justify-center gap-2 transition-colors cursor-pointer text-center ${
+                  isReadingFile ? 'opacity-50 cursor-not-allowed' : ''
+                }`}
+              >
+                <Upload className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400" />
+                <span>{isReadingFile ? 'בודק קובץ...' : 'בחר קובץ גיבוי לשחזור'}</span>
+              </label>
+            </div>
+          </div>
+        </div>
+
+        {/* Safety Rollback Banner (Undo) */}
+        {preRestoreSnapshot && (
+          <div className="p-3.5 rounded-lg bg-amber-50/70 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+            <div className="space-y-0.5">
+              <div className="flex items-center gap-1.5 font-semibold text-amber-900 dark:text-amber-200 text-xs">
+                <History className="w-3.5 h-3.5 text-amber-600 dark:text-amber-400 shrink-0" />
+                <span>קיים עותק בטיחות לשחזור לאחור</span>
+              </div>
+              <p className="text-[11px] text-slate-600 dark:text-slate-300">
+                נשמר ב-{new Date(preRestoreSnapshot.timestamp).toLocaleDateString('he-IL')} {new Date(preRestoreSnapshot.timestamp).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })} ({preRestoreSnapshot.summary.transactionsCount} עסקאות, {preRestoreSnapshot.summary.accountsCount} חשבונות).
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handleRollbackSnapshot}
+              className="py-1.5 px-3 rounded-lg bg-amber-600 hover:bg-amber-700 text-white font-medium text-xs flex items-center justify-center gap-1.5 transition-colors cursor-pointer shrink-0"
+            >
+              <RotateCcw className="w-3.5 h-3.5" />
+              <span>שחזר למצב שקדם לשחזור</span>
+            </button>
+          </div>
+        )}
+      </div>
+
+      {/* Restore Confirmation & Inspection Modal */}
+      {showRestoreConfirmModal && validationResult && validationResult.parsedPayload && (
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-xs flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-2xl max-w-lg w-full p-6 shadow-xl space-y-4 animate-in fade-in zoom-in-95 duration-150">
+            <div className="flex items-center justify-between pb-2 border-b border-slate-100 dark:border-slate-800">
+              <div className="flex items-center gap-2 text-[#0F172A] dark:text-white font-bold text-base">
+                <FileText className="w-5 h-5 text-indigo-600 dark:text-indigo-400" />
+                <span>אישור שחזור נתונים מקובץ גיבוי</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowRestoreConfirmModal(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 p-1 rounded-lg cursor-pointer"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            <p className="text-xs text-slate-600 dark:text-slate-300 leading-relaxed">
+              הקובץ נבדק ואומת בהצלחה. להלן סיכום הנתונים שנמצאו בקובץ הגיבוי:
+            </p>
+
+            {/* Summary details */}
+            <div className="p-3.5 rounded-xl bg-slate-50 dark:bg-[#0B0F17] border border-slate-200 dark:border-slate-800 text-xs space-y-2">
+              <div className="grid grid-cols-2 gap-2 text-slate-700 dark:text-slate-300">
+                <div>
+                  <span className="text-slate-400 block text-[11px]">תאריך יצירת הגיבוי:</span>
+                  <span className="font-semibold">
+                    {validationResult.exportedAt
+                      ? new Date(validationResult.exportedAt).toLocaleDateString('he-IL') +
+                        ' ' +
+                        new Date(validationResult.exportedAt).toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit' })
+                      : 'לא צוין'}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">עסקאות:</span>
+                  <span className="font-semibold text-indigo-600 dark:text-indigo-400">
+                    {validationResult.summary?.transactionsCount || 0}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">חשבונות:</span>
+                  <span className="font-semibold">{validationResult.summary?.accountsCount || 0}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">תקציבים ויעדים:</span>
+                  <span className="font-semibold">
+                    {(validationResult.summary?.budgetsCount || 0) + (validationResult.summary?.goalsCount || 0)}
+                  </span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">חוקי קטגוריות שנלמדו:</span>
+                  <span className="font-semibold">{validationResult.summary?.rulesCount || 0}</span>
+                </div>
+                <div>
+                  <span className="text-slate-400 block text-[11px]">מסמכים שיובאו:</span>
+                  <span className="font-semibold">{validationResult.summary?.documentsCount || 0}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Warnings list if any */}
+            {validationResult.warnings && validationResult.warnings.length > 0 && (
+              <div className="p-3 rounded-lg bg-amber-50 dark:bg-amber-950/40 border border-amber-200 dark:border-amber-800 text-xs text-amber-800 dark:text-amber-300 space-y-1">
+                <span className="font-semibold flex items-center gap-1">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0" />
+                  הערות ולידציה:
+                </span>
+                <ul className="list-disc list-inside text-[11px] space-y-0.5">
+                  {validationResult.warnings.map((w, idx) => (
+                    <li key={idx}>{w}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+
+            {/* Safety notice */}
+            <div className="p-3 rounded-lg bg-indigo-50/70 dark:bg-indigo-950/30 border border-indigo-100 dark:border-indigo-900/50 text-[11px] text-indigo-900 dark:text-indigo-300 flex items-start gap-2">
+              <ShieldCheck className="w-4 h-4 text-indigo-600 dark:text-indigo-400 shrink-0 mt-0.5" />
+              <span>
+                שחזור נתונים יחליף את הנתונים המוצגים כרגע. עותק בטיחות מלא יישמר אוטומטית לפני ביצוע הפעולה, כך שתוכל לחזור למצב הנוכחי בלחיצת כפתור אחת.
+              </span>
+            </div>
+
+            {/* Modal action buttons */}
+            <div className="flex items-center justify-end gap-2.5 pt-2">
+              <button
+                type="button"
+                onClick={() => setShowRestoreConfirmModal(false)}
+                className="px-4 py-2 rounded-lg bg-slate-100 hover:bg-slate-200 dark:bg-slate-800 dark:hover:bg-slate-700 text-slate-700 dark:text-slate-300 text-xs font-medium transition-colors cursor-pointer"
+              >
+                ביטול
+              </button>
+              <button
+                type="button"
+                onClick={handleConfirmRestore}
+                className="px-4 py-2 rounded-lg bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-semibold flex items-center gap-1.5 transition-colors cursor-pointer shadow-xs"
+              >
+                <CheckCircle2 className="w-4 h-4" />
+                <span>אשר ושחזר נתונים</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* 7. PRIVACY & LOCAL TESTING TOOLS */}
       <div className="bg-white dark:bg-[#111827] border border-slate-200 dark:border-[#1F2937] rounded-xl p-5 shadow-xs space-y-3 transition-colors">
         <h3 className="text-sm font-bold text-[#0F172A] dark:text-white flex items-center gap-2">
           <Lock className="w-4 h-4 text-slate-600 dark:text-slate-400" />

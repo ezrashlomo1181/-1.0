@@ -516,6 +516,90 @@ const HEBREW_MONTHS: Record<string, string> = {
   'דצמבר': '12', 'דצמ': '12',
 };
 
+// -------------------------------------------------------------
+// TRANSACTION DESCRIPTION CLEANING & EXTRACTION HELPERS
+// -------------------------------------------------------------
+
+/**
+ * Checks if a description string is only a technical / generic transaction classification
+ * (e.g. "עסקה רגילה (כולל דביט)") rather than an actual merchant name.
+ */
+export function isGenericTransactionType(desc: string): boolean {
+  if (!desc) return true;
+  const cleaned = desc.trim();
+  if (cleaned.length < 2) return true;
+
+  const genericPatterns = [
+    /^עסקה רגילה(?:\s*\(כולל דביט\))?$/i,
+    /^עסקה רגילה$/i,
+    /^דביט$/i,
+    /^עסקת דביט$/i,
+    /^כרטיס דביט$/i,
+    /^משיכת מזומן(?:\s*במכשיר)?$/i,
+    /^חיוב כרטיס(?:\s*אשראי)?$/i,
+    /^העברה בנקאית$/i,
+    /^העברה$/i,
+    /^העברה בין חשבונות$/i,
+    /^העברה עצמית$/i,
+    /^הוראת קבע$/i,
+    /^פירעון כרטיס$/i,
+    /^עסקה ללא שם$/i,
+    /^עסקה ללא פירוט$/i,
+  ];
+
+  return genericPatterns.some((pattern) => pattern.test(cleaned));
+}
+
+/**
+ * Cleans extracted transaction descriptions to eliminate embedded technical artifacts
+ * such as duplicate currency codes and amounts (e.g., "ILS 7.23 ILS עסקה רגילה (כולל דביט)"
+ * or "שופרסל דיל ₪ 250.00"), while strictly preserving legitimate merchant names and details
+ * including legitimate numbers (e.g. "סופר-פארם סניף 120", "קפה 4", "7-Eleven").
+ */
+export function cleanTransactionDescription(rawDesc: string): string {
+  if (!rawDesc) return '';
+  let str = cleanFinancialString(rawDesc);
+  if (!str) return '';
+
+  // 1. Remove wrapping outer quotes
+  str = str.replace(/^["']+|["']+$/g, '').trim();
+
+  // 2. Remove recognized technical currency + amount prefixes / suffixes / duplicates:
+  // E.g. "ILS 7.23 ILS ...", "USD 50.00 ...", "₪ 120.50 ..."
+  // Matches: (CURRENCY + AMOUNT + OPTIONAL_CURRENCY) at the start or end
+  const currencyAmountPrefixRegex = /^(?:(?:ILS|USD|EUR|GBP|₪|\$|€)\s+)?\b\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?\b\s*(?:ILS|USD|EUR|GBP|₪|\$|€)?\s*/i;
+  const currencyPrefixRegex = /^(?:ILS|USD|EUR|GBP|₪|\$|€)\s+\b\d{1,3}(?:,\d{3})*(?:\.\d{1,2})?\b\s*(?:ILS|USD|EUR|GBP|₪|\$|€)?\s*/i;
+
+  // If starts with "ILS 7.23 ILS " or "ILS 7.23 " or "7.23 ILS "
+  let prevStr = '';
+  while (str !== prevStr) {
+    prevStr = str;
+    str = str.replace(/^(?:ILS|USD|EUR|GBP|₪|\$|€)\s+[-+]?\d+(?:,\d{3})*(?:\.\d{1,2})?\s*(?:ILS|USD|EUR|GBP|₪|\$|€)?\s*/i, '').trim();
+    str = str.replace(/^[-+]?\d+(?:,\d{3})*(?:\.\d{1,2})?\s*(?:ILS|USD|EUR|GBP|₪|\$|€)\s*/i, '').trim();
+  }
+
+  // Trailing currency + amount artifacts: e.g. "... ILS 7.23" or "... 7.23 ILS" or "... ₪ 120.00"
+  prevStr = '';
+  while (str !== prevStr) {
+    prevStr = str;
+    str = str.replace(/\s*(?:ILS|USD|EUR|GBP|₪|\$|€)\s*[-+]?\d+(?:,\d{3})*(?:\.\d{1,2})?$/i, '').trim();
+    str = str.replace(/\s*[-+]?\d+(?:,\d{3})*(?:\.\d{1,2})?\s*(?:ILS|USD|EUR|GBP|₪|\$|€)$/i, '').trim();
+  }
+
+  // Standalone orphaned currency codes leftover at edges (e.g. "ILS עסקה...", "ILS ...", "... ₪")
+  prevStr = '';
+  while (str !== prevStr) {
+    prevStr = str;
+    str = str.replace(/^(?:ILS|USD|EUR|GBP|₪|\$|€)\s+/i, '').trim();
+    str = str.replace(/\s+(?:ILS|USD|EUR|GBP|₪|\$|€)$/i, '').trim();
+  }
+
+  // Normalize multi-spaces
+  str = str.replace(/\s{2,}/g, ' ').trim();
+
+  return str;
+}
+
 export function cleanFinancialString(raw: any): string {
   if (raw === null || raw === undefined) return '';
   return String(raw)
@@ -857,6 +941,17 @@ function buildTransactionObject(params: {
     occurrence,
   } = params;
 
+  // Clean technical currency/amount artifacts from raw merchant & description
+  const cleanedMerchant = cleanTransactionDescription(merchant);
+  const cleanedDesc = cleanTransactionDescription(description);
+
+  // If the description is a generic classification (e.g. "עסקה רגילה (כולל דביט)"),
+  // preserve it truthfully as the description/source description, but do NOT invent a fake merchant name!
+  // If merchant is purely generic, keep merchant as the specific generic string or 'עסקה ללא שם'
+  const isGeneric = isGenericTransactionType(cleanedMerchant);
+  const effectiveMerchant = cleanedMerchant || (cleanedDesc ? cleanedDesc : 'עסקה ללא שם');
+  const effectiveDescription = cleanedDesc || effectiveMerchant;
+
   const isCreditCardSource =
     institutionInfo.defaultPayment === 'credit_card' ||
     Boolean(institutionInfo.isCreditCardOnly) ||
@@ -865,8 +960,8 @@ function buildTransactionObject(params: {
 
   // 1. Central Semantic Classification Engine
   const classification = classifyTransactionSemantics({
-    merchant,
-    description: description || rawCategory,
+    merchant: effectiveMerchant,
+    description: effectiveDescription || rawCategory,
     rawCategory,
     isCreditRow,
     isDebitRow,
@@ -876,7 +971,7 @@ function buildTransactionObject(params: {
 
   // 2. Prevent impossible combinations (e.g. Income + Clothing, Income + Supermarket)
   const validated = validateAndFixTransactionCombination({
-    merchant,
+    merchant: effectiveMerchant,
     category: rawCategory || classification.category,
     type: classification.type,
   });
@@ -901,7 +996,7 @@ function buildTransactionObject(params: {
   const docRole = identifyDocumentRole({
     sourceDocument: sourceFileName,
     accountName: institutionInfo.accountName,
-    description,
+    description: effectiveDescription,
     paymentMethod: institutionInfo.defaultPayment,
   } as any);
 
@@ -910,11 +1005,11 @@ function buildTransactionObject(params: {
 
   const roundedAmount = Math.round(amount * 100) / 100;
   const initialTxId = `tx-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
-  const fullDesc = ref ? `${merchant} (אסמכתא: ${ref})` : (description || merchant);
+  const fullDesc = ref ? `${effectiveMerchant} (אסמכתא: ${ref})` : (effectiveDescription || effectiveMerchant);
   const rowIdempotency = generateRowIdempotencyKey({
     date,
     amount: roundedAmount,
-    merchant,
+    merchant: effectiveMerchant,
     ref,
     accountId: institutionInfo.accountId,
     currency: 'ILS',
@@ -929,7 +1024,7 @@ function buildTransactionObject(params: {
     date,
     originalDate: date,
     description: fullDesc,
-    merchant: merchant || 'עסקה ללא שם',
+    merchant: effectiveMerchant,
     accountId: institutionInfo.accountId,
     accountName: institutionInfo.accountName,
     paymentMethod: institutionInfo.defaultPayment,
@@ -944,7 +1039,7 @@ function buildTransactionObject(params: {
     billingDate: billingDate || undefined,
     amount: roundedAmount,
     currency: 'ILS',
-    merchant: merchant || 'עסקה ללא שם',
+    merchant: effectiveMerchant,
     description: fullDesc,
     accountId: institutionInfo.accountId,
     accountName: institutionInfo.accountName,

@@ -44,6 +44,27 @@ export interface MergeHistorySnapshot {
   originalTransactions: Transaction[];
 }
 
+export interface EnrichmentSnapshot {
+  linkedAt: string;
+  linkedTransactionId: string;
+  reason: string;
+  confidenceScore: number;
+  // Previous field values before enrichment
+  originalMerchant: string;
+  originalDescription: string;
+  originalCategory: string;
+  originalDate: string;
+  originalTargetOriginalDate?: string;
+  originalReconciliationStatus?: 'unreconciled' | 'reconciled' | 'partial' | 'settlement_matched';
+  originalNeedsReview: boolean;
+  originalReviewReason?: string;
+  // Applied enriched values to detect post-enrichment manual modifications
+  appliedEnrichedMerchant?: string;
+  appliedEnrichedDescription?: string;
+  appliedEnrichedCategory?: string;
+  appliedEnrichedOriginalDate?: string;
+}
+
 export interface DuplicateCandidate {
   existingTransactionId: string;
   incomingRecord: SourceRecord;
@@ -100,6 +121,8 @@ export interface Transaction {
   // Multi-source and deduplication model (Stage 1)
   sourceRecords?: SourceRecord[];
   mergeHistory?: MergeHistorySnapshot[];
+  enrichmentSnapshots?: EnrichmentSnapshot[];
+  userCustomizedCategory?: boolean; // Protects user-assigned categories from overwrite
   originalTransactionId?: string;
   idempotencyKey?: string;
 

@@ -5,6 +5,7 @@ import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
 import { createRequire } from 'module';
+import { cleanTransactionDescription, isGenericTransactionType } from './src/services/documentParser.js';
 
 dotenv.config();
 
@@ -190,8 +191,17 @@ app.post('/api/ai/parse-document', async (req, res) => {
 
     // Helper: validate and sanitize transaction semantics (Hierarchy + prevent impossible combinations)
     const sanitizeExtractedTransaction = (item: any) => {
-      const merchant = String(item.merchant || item.description || 'עסקה ללא שם').trim();
-      const desc = String(item.description || merchant).trim();
+      const rawMerchant = String(item.merchant || item.description || 'עסקה ללא שם').trim();
+      const rawDesc = String(item.description || item.merchant || '').trim();
+
+      const cleanedMerchant = cleanTransactionDescription(rawMerchant);
+      const cleanedDesc = cleanTransactionDescription(rawDesc);
+
+      const effectiveMerchant = cleanedMerchant || (cleanedDesc ? cleanedDesc : 'עסקה ללא שם');
+      const effectiveDescription = cleanedDesc || effectiveMerchant;
+
+      const merchant = effectiveMerchant;
+      const desc = effectiveDescription;
       let category = String(item.category || 'כללי').trim();
       let type = String(item.type || 'expense').toLowerCase();
       let isInternalTransfer = Boolean(item.isInternalTransfer);
@@ -316,8 +326,8 @@ app.post('/api/ai/parse-document', async (req, res) => {
     const extractLocalTransactionsFromText = (text: string) => {
       const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const results: any[] = [];
-      const dateRegex = /\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](\d{2,4})\b/;
-      const amountRegex = /\b-?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})\b|\b-?\d+\.\d{2}\b/;
+      const dateRegex = /\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](\d{2,4})\b/g;
+      const amountRegex = /\b-?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})\b|\b-?\d+\.\d{2}\b/g;
 
       for (const line of lines) {
         // Skip header / summary lines
@@ -326,36 +336,62 @@ app.post('/api/ai/parse-document', async (req, res) => {
           line.includes('סך הכל') ||
           line.includes('יתרה לתשלום') ||
           line.includes('יתרה קודמת') ||
+          line.includes('יתרת סגירה') ||
           line.includes('דף מספר')
         ) {
           continue;
         }
 
-        const dateMatch = line.match(dateRegex);
-        const amountMatch = line.match(amountRegex);
+        const dateMatches = Array.from(line.matchAll(dateRegex));
+        const amountMatches = Array.from(line.matchAll(amountRegex));
 
-        if (dateMatch && amountMatch) {
-          const d = dateMatch[1].padStart(2, '0');
-          const m = dateMatch[2].padStart(2, '0');
-          let y = parseInt(dateMatch[3], 10);
-          if (y < 50) y += 2000;
-          else if (y < 100) y += 1900;
-          const normalizedDate = `${y}-${m}-${d}`;
+        if (dateMatches.length > 0 && amountMatches.length > 0) {
+          // Date selection: In Israeli bank statements, if there are multiple dates (e.g. value date and transaction date),
+          // handle both: dateMatches[0] and dateMatches[1] if present.
+          const parseDateMatch = (dm: RegExpMatchArray) => {
+            const d = dm[1].padStart(2, '0');
+            const m = dm[2].padStart(2, '0');
+            let y = parseInt(dm[3], 10);
+            if (y < 50) y += 2000;
+            else if (y < 100) y += 1900;
+            return `${y}-${m}-${d}`;
+          };
 
-          const rawAmountStr = amountMatch[0].replace(/,/g, '');
-          const numAmount = Math.abs(parseFloat(rawAmountStr));
-          if (isNaN(numAmount) || numAmount === 0) continue;
+          const normalizedDate = parseDateMatch(dateMatches[0]);
+          const billingDate = dateMatches.length > 1 ? parseDateMatch(dateMatches[1]) : undefined;
 
-          let merchant = line
-            .replace(dateMatch[0], '')
-            .replace(amountMatch[0], '')
-            .replace(/[₪$€,\-]/g, '')
-            .trim();
+          // Amount selection: pick the first valid financial amount that isn't 0
+          let numAmount = 0;
+          for (const mMatch of amountMatches) {
+            const rawAmountStr = mMatch[0].replace(/,/g, '');
+            const parsed = Math.abs(parseFloat(rawAmountStr));
+            if (!isNaN(parsed) && parsed > 0) {
+              numAmount = parsed;
+              break;
+            }
+          }
+          if (numAmount === 0) continue;
+
+          // Strip ONLY matched dates and amounts by their specific matched tokens / bounds,
+          // rather than global regex replacements of digits which destroy store names like 'שופרסל סניף 4'
+          let strippedLine = line;
+          for (const dm of dateMatches) {
+            strippedLine = strippedLine.replace(dm[0], ' ');
+          }
+          for (const am of amountMatches) {
+            strippedLine = strippedLine.replace(am[0], ' ');
+          }
+
+          // Clean currency symbols and technical artifacts using cleanTransactionDescription
+          let merchant = cleanTransactionDescription(
+            strippedLine.replace(/[₪$€,\-]/g, ' ')
+          );
 
           if (merchant.length < 2) merchant = 'עסקה ללא שם';
 
           const sanitized = sanitizeExtractedTransaction({
             date: normalizedDate,
+            billingDate,
             merchant,
             description: merchant,
             amount: numAmount,
@@ -528,8 +564,12 @@ app.post('/api/ai/parse-document', async (req, res) => {
 
 async function startServer() {
   if (process.env.NODE_ENV !== 'production') {
+    process.env.DISABLE_HMR = 'true';
     const vite = await createViteServer({
-      server: { middlewareMode: true },
+      server: {
+        middlewareMode: true,
+        hmr: false,
+      },
       appType: 'spa',
     });
     app.use(vite.middlewares);

@@ -261,6 +261,13 @@ export default function App() {
     setState(empty);
   };
 
+  const handleRestoreState = (restoredState: AppState) => {
+    setState(restoredState);
+    if (restoredState.learnedRules && restoredState.learnedRules.length > 0) {
+      saveStoredLearnedRules(restoredState.learnedRules);
+    }
+  };
+
   // Handlers for Budgets, Goals, Commitments updates
   const handleUpdateBudgets = (updated: BudgetCategory[]) => {
     setState((prev) => ({ ...prev, budgets: updated }));
@@ -872,6 +879,8 @@ export default function App() {
 
           {currentSection === 'settings' && (
             <SettingsView
+              appState={state}
+              onRestoreState={handleRestoreState}
               learnedRules={state.learnedRules}
               onUpdateRules={handleUpdateRules}
               onResetDemoData={handleResetDemoData}

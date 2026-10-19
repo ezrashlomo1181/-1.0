@@ -13,19 +13,19 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Assistant:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <script>
-      // Ignore only specific Vite HMR WebSocket disconnection errors in AI Studio iframe environment
+      // Ignore Vite HMR WebSocket disconnection errors in AI Studio iframe environment
       function isViteHmrWebSocketError(msg, stack, filename) {
         msg = msg || '';
         stack = stack || '';
         filename = filename || '';
-        // 1. Specific WebSocket closed without opened error
         if (msg.includes('WebSocket closed without opened') || stack.includes('WebSocket closed without opened')) {
           return true;
         }
-        // 2. Explicit WebSocket error originating from @vite/client
-        var isFromViteClient = filename.includes('@vite/client') || stack.includes('@vite/client');
+        if (filename.includes('@vite/client') || stack.includes('@vite/client')) {
+          return true;
+        }
         var isWsError = msg.toLowerCase().includes('websocket') || stack.toLowerCase().includes('websocket');
-        if (isFromViteClient && isWsError) {
+        if (isWsError) {
           return true;
         }
         return false;
@@ -37,8 +37,9 @@
         var stack = (reason && reason.stack) || '';
         if (isViteHmrWebSocketError(msg, stack, '')) {
           event.preventDefault();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
         }
-      });
+      }, true);
       window.addEventListener('error', function(event) {
         var msg = event.message || '';
         var filename = event.filename || '';
@@ -46,8 +47,9 @@
         var stack = (error && error.stack) || '';
         if (isViteHmrWebSocketError(msg, stack, filename)) {
           event.preventDefault();
+          if (event.stopImmediatePropagation) event.stopImmediatePropagation();
         }
-      });
+      }, true);
       (function() {
         try {
           var mode = localStorage.getItem('matzpen_theme_mode') || 'system';
