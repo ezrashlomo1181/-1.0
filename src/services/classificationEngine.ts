@@ -79,7 +79,7 @@ export const CATEGORY_MAP: {
       'הו הו', 'hoodies', 'אדידס', 'adidas', 'נייקי', 'nike', 'פוט לוקר', 'foot locker',
       'שילב', 'מוצצים', 'טויס אר אס', 'toys r us', 'מקס סטוק', 'max stock', 'גמבו', 'jumbo',
       'הסטוק', 'דייסון', 'dyson', 'עולם הקולנוע', 'נעלי', 'בגדי', 'אופטיקה', 'אופטיקנה',
-      'הלפרין', 'קרביץ', 'סטימצקי', 'צומת ספרים'
+      'הלפרין', 'קרביץ', 'סטימצקי', 'צומת ספרים', 'גולף', 'golf', 'קבוצת גולף', 'פולגת', 'אינטימה'
     ],
     category: 'קניות וביגוד',
     type: 'expense'
@@ -217,7 +217,16 @@ export function classifyTransactionSemantics(params: {
   // 1. PRIORITY 1: User learned rule
   const userRule = matchLearnedRule(mClean, dClean, customRules);
   if (userRule) {
-    const assignedType = userRule.assignedType || 'expense';
+    const isRowInCreditOrDeposit = isCreditRow || (amountIsNegative && isCreditCardSource);
+    let assignedType = userRule.assignedType || 'expense';
+
+    // If the user rule was set to 'expense' (standard for purchase merchants),
+    // but this specific transaction is an inflow/credit row on a credit card statement,
+    // preserve the user's category (e.g. 'מזון וסופר') while correctly typing it as 'refund'.
+    if (isRowInCreditOrDeposit && assignedType === 'expense' && isCreditCardSource) {
+      assignedType = 'refund';
+    }
+
     return {
       category: userRule.assignedCategory,
       type: assignedType,
@@ -304,33 +313,73 @@ export function classifyTransactionSemantics(params: {
   }
 
   // D. Explicit Refunds & Credits
-  const hasExplicitRefundWords =
-    (combined.includes('זיכוי') && !combined.includes('זיכוי שכר')) ||
-    combined.includes('החזר כספי') ||
-    combined.includes('ביטול עסקה') ||
-    combined.includes('החזר חיוב') ||
-    combined.includes('זיכוי כרטיס') ||
-    combined.includes('refund') ||
-    combined.includes('reversal') ||
-    amountIsNegative;
+  // Crucial distinction: On credit cards, a credit or negative amount from a merchant is almost always a purchase refund.
+  // On a bank checking account, "זיכוי" simply means a credit/deposit entry (Inflow);
+  // therefore on bank accounts, only explicit refund words (ביטול עסקה, החזר כספי, etc.) count as refund!
+  const hasExplicitRefundWords = isCreditCardSource
+    ? (combined.includes('זיכוי') && !combined.includes('זיכוי שכר')) ||
+      combined.includes('החזר כספי') ||
+      combined.includes('ביטול עסקה') ||
+      combined.includes('החזר חיוב') ||
+      combined.includes('זיכוי כרטיס') ||
+      combined.includes('refund') ||
+      combined.includes('reversal') ||
+      amountIsNegative
+    : combined.includes('החזר כספי') ||
+      combined.includes('ביטול עסקה') ||
+      combined.includes('החזר חיוב') ||
+      (combined.includes('החזר') &&
+        !combined.includes('החזר מס') &&
+        !combined.includes('החזר הלוואה') &&
+        !combined.includes('החזר משכנתא')) ||
+      combined.includes('זיכוי בגין ביטול') ||
+      combined.includes('refund') ||
+      combined.includes('reversal');
 
-  // E. Explicit Genuine Income
+  // E. Explicit Genuine Income (Expanded with Israeli payroll institutions & formats)
   const hasExplicitIncomeWords =
     combined.includes('משכורת') ||
     combined.includes('שכר עבודה') ||
     combined.includes('העברת שכר') ||
     combined.includes('שכר חודשי') ||
     combined.includes('זיכוי שכר') ||
+    combined.includes('הפקדת שכר') ||
+    combined.includes('משכורות') ||
     (combined.includes('שכר') &&
       !combined.includes('שכר דירה') &&
       !combined.includes('שכר לימוד') &&
-      !combined.includes('שכירות')) ||
+      !combined.includes('שכירות') &&
+      !combined.includes('דמי שכירות') &&
+      !combined.includes('שכר טרחה')) ||
+    combined.includes('מופת') ||
+    combined.includes('מופ"ת') ||
+    combined.includes('מופ״ת') ||
+    combined.includes('מתש') ||
+    combined.includes('מת"ש') ||
+    combined.includes('מת״ש') ||
+    combined.includes('מסב') ||
+    combined.includes('מס"ב') ||
+    combined.includes('מס״ב') ||
+    combined.includes('חילן') ||
+    combined.includes('hilan') ||
+    combined.includes('מלם שכר') ||
+    combined.includes('מלם-שכר') ||
+    combined.includes('מלם') ||
+    combined.includes('הר-גל') ||
+    combined.includes('הר גל') ||
+    combined.includes('סינאל') ||
+    combined.includes('synel') ||
     combined.includes('ביטוח לאומי') ||
     combined.includes('קצבת ילדים') ||
     combined.includes('קצבת זקנה') ||
     combined.includes('קצבת נכות') ||
+    combined.includes('קצבת שארים') ||
     combined.includes('דמי לידה') ||
     combined.includes('דמי אבטלה') ||
+    combined.includes('קצבה') ||
+    combined.includes('קצבת') ||
+    combined.includes('גמלה') ||
+    combined.includes('גימלה') ||
     combined.includes('הפקדת צ\'ק') ||
     combined.includes('הפקדת שיק') ||
     combined.includes('הפקדת שק') ||
@@ -342,7 +391,27 @@ export function classifyTransactionSemantics(params: {
     combined.includes('החזר מס') ||
     combined.includes('מענק משרד') ||
     combined.includes('מענק קורונה') ||
-    combined.includes('מענק מילואים');
+    combined.includes('מענק מילואים') ||
+    combined.includes('תקבול') ||
+    combined.includes('תקבולים') ||
+    combined.includes('בונוס') ||
+    combined.includes('מענק');
+
+  // F. Potential Inter-bank or Inter-account Transfer Inflow
+  const hasPotentialTransferWords =
+    !isCreditCardSource &&
+    (combined.includes('העברה') ||
+      combined.includes('מזרחי') ||
+      combined.includes('פועלים') ||
+      combined.includes('לאומי') ||
+      combined.includes('דיסקונט') ||
+      combined.includes('יהב') ||
+      combined.includes('בינלאומי') ||
+      combined.includes('פאגי') ||
+      combined.includes('מסד') ||
+      combined.includes('וואן זירו') ||
+      combined.includes('one zero') ||
+      combined.includes('העברה מבנק'));
 
   // 3. PRIORITY 3: Merchant context lookup
   let matchedCategory = rawCategory || '';
@@ -356,23 +425,6 @@ export function classifyTransactionSemantics(params: {
     if (matchedCategory) break;
   }
 
-  // 4. PRIORITY 4: Handle Credit Rows / Positive Amounts Without Falling into the "Positive = Income" Trap
-  const isRowInCreditOrDeposit = isCreditRow || (amountIsNegative && isCreditCardSource);
-
-  // If explicit income words exist (salary, dividend, etc.):
-  if (hasExplicitIncomeWords) {
-    return {
-      category: matchedCategory || 'משכורת והכנסות',
-      type: 'income',
-      confidenceScore: 0.95,
-      confidenceLevel: 'high',
-      isInternalTransfer: false,
-      isUserRule: false,
-      needsReview: false,
-    };
-  }
-
-  // If merchant has consumer category (e.g. Shopping, Supermarket, Dining, Pharmacy)
   const isConsumerCategory = [
     'קניות וביגוד',
     'מזון וסופר',
@@ -382,11 +434,38 @@ export function classifyTransactionSemantics(params: {
     'תקשורת וטכנולוגיה',
   ].includes(matchedCategory);
 
-  if (isConsumerCategory) {
-    if (hasExplicitRefundWords || isRowInCreditOrDeposit) {
-      // CRITICAL REQUIREMENT #2 & #3:
-      // A credit row / positive amount from a consumer merchant (e.g. Zara ₪2,000 credit)
-      // MUST NEVER become Income + Clothing! It is a REFUND that reduces expenses.
+  // 4. PRIORITY 4: Handle Credit Rows / Positive Inflows
+  const isRowInCreditOrDeposit = isCreditRow || (amountIsNegative && isCreditCardSource);
+
+  if (isRowInCreditOrDeposit) {
+    // 4.1 Explicit Genuine Income (Salary, payroll clearing, pension, allowance)
+    if (hasExplicitIncomeWords) {
+      return {
+        category: matchedCategory && !isConsumerCategory ? matchedCategory : 'משכורת והכנסות',
+        type: 'income',
+        confidenceScore: 0.95,
+        confidenceLevel: 'high',
+        isInternalTransfer: false,
+        isUserRule: false,
+        needsReview: false,
+      };
+    }
+
+    // 4.2 Explicit Refunds (e.g. "ביטול עסקה", "החזר כספי" or on credit card statements)
+    if (hasExplicitRefundWords) {
+      return {
+        category: matchedCategory || 'החזרים וזיכויים',
+        type: 'refund',
+        confidenceScore: isCreditCardSource ? 0.94 : 0.9,
+        confidenceLevel: 'high',
+        isInternalTransfer: false,
+        isUserRule: false,
+        needsReview: false,
+      };
+    }
+
+    // 4.3 Credit Card Statement with Consumer Merchant -> legitimate purchase refund
+    if (isCreditCardSource && isConsumerCategory) {
       return {
         category: matchedCategory,
         type: 'refund',
@@ -398,44 +477,49 @@ export function classifyTransactionSemantics(params: {
       };
     }
 
-    // Normal debit/expense in consumer category
-    return {
-      category: matchedCategory,
-      type: 'expense',
-      confidenceScore: 0.92,
-      confidenceLevel: 'high',
-      isInternalTransfer: false,
-      isUserRule: false,
-      needsReview: false,
-    };
-  }
+    // 4.4 Bank Checking Account with Consumer Merchant (e.g. "קבוצת גולף-י" in bank account)
+    // CRITICAL: Do NOT assume with certainty that an inflow from Golf Group in checking is a refund!
+    // It could be salary/payroll for an employee, or an expense refund.
+    // Must be flagged for user review, and NOT counted as refund or income until resolved.
+    if (!isCreditCardSource && isConsumerCategory) {
+      return {
+        category: 'אחר / לבירור',
+        type: 'other',
+        confidenceScore: 0.5,
+        confidenceLevel: 'medium',
+        isInternalTransfer: false,
+        isUserRule: false,
+        needsReview: true,
+        reviewReason: `זוהתה תנועת זכות בעו"ש מגוף צרכני (${mClean}) – נדרש אימות האם מדובר בהכנסה/שכר או בהחזר כספי`,
+      };
+    }
 
-  // If explicit refund words are present:
-  if (hasExplicitRefundWords) {
-    return {
-      category: matchedCategory || 'החזרים וזיכויים',
-      type: 'refund',
-      confidenceScore: 0.9,
-      confidenceLevel: 'high',
-      isInternalTransfer: false,
-      isUserRule: false,
-      needsReview: false,
-    };
-  }
+    // 4.5 Potential Inter-account Transfer Inflow
+    if (hasPotentialTransferWords) {
+      return {
+        category: 'העברות ומזומן',
+        type: 'other',
+        confidenceScore: 0.65,
+        confidenceLevel: 'medium',
+        isInternalTransfer: false,
+        isUserRule: false,
+        needsReview: true,
+        reviewReason: `זוהתה העברה נכנסת בעו"ש (${mClean}) – נדרש אימות האם זו העברה פנימית בין חשבונותיך או הכנסה/תקבול`,
+      };
+    }
 
-  // If row is in credit column but has NO evidence of salary or consumer merchant:
-  if (isRowInCreditOrDeposit) {
-    // CRITICAL: A credit column alone is NOT evidence of income.
-    // Flag for review as potential credit/refund/deposit rather than silently creating fake salary.
+    // 4.6 Unidentified Bank Deposit / Inflow
+    // CRITICAL: A credit column in bank checking is NOT an expense refund!
+    // Flag for review as 'other' so it does NOT reduce expenses and is NOT treated as definite income until verified.
     return {
-      category: matchedCategory || 'אחר / ללא סיווג',
-      type: 'refund',
-      confidenceScore: 0.6,
-      confidenceLevel: 'medium',
+      category: matchedCategory || 'אחר / לבירור',
+      type: 'other',
+      confidenceScore: 0.5,
+      confidenceLevel: 'low',
       isInternalTransfer: false,
       isUserRule: false,
       needsReview: true,
-      reviewReason: 'זוהתה תנועת זכות/זיכוי ללא פירוט מספק – נדרש אימות האם זהו החזר כספי (הקטנת הוצאות) או הכנסה',
+      reviewReason: 'זוהתה הפקדת זכות בעו"ש ללא סיווג ודאי – נדרש אימות האם זו הכנסה, העברה או החזר',
     };
   }
 
@@ -492,8 +576,17 @@ export function validateAndFixTransactionCombination(tx: {
   const hasSalaryWords =
     mLower.includes('משכורת') ||
     mLower.includes('שכר') ||
+    mLower.includes('מופת') ||
+    mLower.includes('מופ"ת') ||
+    mLower.includes('מתש') ||
+    mLower.includes('מת"ש') ||
+    mLower.includes('מסב') ||
+    mLower.includes('מס"ב') ||
+    mLower.includes('חילן') ||
+    mLower.includes('מלם') ||
     mLower.includes('ביטוח לאומי') ||
     mLower.includes('קצבה') ||
+    mLower.includes('גמלה') ||
     mLower.includes('דיבידנד');
 
   if (type === 'income' && consumerCategories.some((c) => category.includes(c))) {

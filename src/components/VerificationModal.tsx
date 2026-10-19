@@ -1,5 +1,5 @@
-import React, { useState } from 'react';
-import { Transaction, LearnedRule } from '../types/financial';
+import React, { useState, useEffect } from 'react';
+import { Transaction, LearnedRule, TransactionType } from '../types/financial';
 import { AlertCircle, CheckCircle2, ShieldCheck, Sparkles, X, ArrowLeft } from 'lucide-react';
 
 interface VerificationModalProps {
@@ -9,7 +9,8 @@ interface VerificationModalProps {
     transactionId: string,
     chosenCategory: string,
     userNotes: string,
-    createRuleOption: 'all_similar' | 'exact_only' | 'none'
+    createRuleOption: 'all_similar' | 'exact_only' | 'none',
+    chosenType?: TransactionType
   ) => void;
 }
 
@@ -19,14 +20,48 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
   onResolve,
 }) => {
   const [selectedCategory, setSelectedCategory] = useState<string>('');
+  const [selectedType, setSelectedType] = useState<TransactionType>('expense');
   const [customCategory, setCustomCategory] = useState<string>('');
   const [userNotes, setUserNotes] = useState<string>('');
   const [ruleOption, setRuleOption] = useState<'all_similar' | 'exact_only' | 'none'>('all_similar');
   const [step, setStep] = useState<'classify' | 'rule'>('classify');
 
+  useEffect(() => {
+    if (transaction) {
+      if (transaction.type === 'income') setSelectedType('income');
+      else if (transaction.type === 'transfer' || transaction.isInternalTransfer) setSelectedType('transfer');
+      else if (transaction.type === 'refund') setSelectedType('refund');
+      else if (transaction.amount < 0 || transaction.category?.includes('הכנס')) setSelectedType('income');
+      else setSelectedType('expense');
+
+      setSelectedCategory(
+        transaction.category && !transaction.category.includes('ללא סיווג') && !transaction.category.includes('לבירור')
+          ? transaction.category
+          : ''
+      );
+      setCustomCategory('');
+      setUserNotes(transaction.userNotes || '');
+      setStep('classify');
+    }
+  }, [transaction?.id]);
+
   if (!transaction) return null;
 
   const effectiveCategory = selectedCategory === 'other_custom' ? customCategory : selectedCategory;
+
+  const handleSelectCategory = (cat: string) => {
+    setSelectedCategory(cat);
+    setCustomCategory('');
+    if (cat === 'משכורת והכנסות' || cat === 'הכנסות') {
+      setSelectedType('income');
+    } else if (cat === 'העברות ומזומן' || cat === 'העברות פנימיות') {
+      setSelectedType('transfer');
+    } else if (cat === 'החזרים וזיכויים') {
+      setSelectedType('refund');
+    } else if (selectedType === 'income' && !cat.includes('הכנס')) {
+      setSelectedType('expense');
+    }
+  };
 
   const handleClassifyNext = () => {
     if (!effectiveCategory) return;
@@ -34,7 +69,7 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
   };
 
   const handleFinalSubmit = () => {
-    onResolve(transaction.id, effectiveCategory, userNotes, ruleOption);
+    onResolve(transaction.id, effectiveCategory, userNotes, ruleOption, selectedType);
     onClose();
   };
 
@@ -108,28 +143,57 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
 
           {step === 'classify' ? (
             <div className="space-y-4">
+              {/* Transaction Type Selector */}
+              <div>
+                <label className="block text-xs font-semibold text-slate-800 dark:text-slate-200 mb-1.5">
+                  סוג התנועה:
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                  {[
+                    { id: 'income', label: 'משכורת / הכנסה', desc: 'הכנסה חדשה' },
+                    { id: 'expense', label: 'הוצאה', desc: 'תשלום שוטף' },
+                    { id: 'refund', label: 'החזר / זיכוי', desc: 'הקטנת הוצאה' },
+                    { id: 'transfer', label: 'העברה פנימית', desc: 'בין חשבונות' },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setSelectedType(t.id as TransactionType)}
+                      className={`p-2 rounded-xl border text-right transition-all cursor-pointer ${
+                        selectedType === t.id
+                          ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-500 dark:bg-slate-800 font-semibold shadow-xs'
+                          : 'border-slate-200 dark:border-[#1F2937] bg-white dark:bg-[#0B0F17] text-slate-700 dark:text-slate-300 hover:border-slate-300 dark:hover:border-slate-700'
+                      }`}
+                    >
+                      <div className="text-xs font-medium">{t.label}</div>
+                      <div className={`text-[10px] ${selectedType === t.id ? 'text-slate-300' : 'text-slate-400'}`}>
+                        {t.desc}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               <div>
                 <label className="block text-xs font-semibold text-slate-800 dark:text-slate-200 mb-2">
                   לאיזו קטגוריה שייכת עסקה זו בפועל?
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {(transaction.reviewOptions || [
-                    'לא ידוע / לבירור',
+                    'משכורת והכנסות',
                     'מזון וסופר',
                     'מסעדות ובילויים',
-                    'משכורת והכנסות',
                     'קניות וביגוד',
                     'תחבורה ורכב',
                     'דיור וחשבונות',
                     'העברות ומזומן',
+                    'החזרים וזיכויים',
+                    'לא ידוע / לבירור',
                   ]).map((opt) => (
                     <button
                       key={opt}
                       type="button"
-                      onClick={() => {
-                        setSelectedCategory(opt);
-                        setCustomCategory('');
-                      }}
+                      onClick={() => handleSelectCategory(opt)}
                       className={`text-right p-3 rounded-xl border text-xs font-medium transition-all cursor-pointer ${
                         selectedCategory === opt
                           ? 'border-slate-900 bg-slate-900 text-white dark:border-slate-600 dark:bg-slate-800 dark:text-white font-semibold shadow-xs'
@@ -191,6 +255,10 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
                   סיווגת עסקה של <strong className="text-slate-900 dark:text-white">{transaction.merchant}</strong> כ-
                   <span className="text-[#059669] dark:text-emerald-400 font-bold px-1.5 py-0.5 bg-emerald-50 dark:bg-emerald-950/40 rounded mr-1">
                     {effectiveCategory}
+                  </span>
+                  {' '}
+                  <span className="text-slate-500 font-mono text-[11px]">
+                    ({selectedType === 'income' ? 'הכנסה' : selectedType === 'refund' ? 'החזר' : selectedType === 'transfer' ? 'העברה' : 'הוצאה'})
                   </span>.
                 </p>
                 <p className="text-slate-500 dark:text-slate-400">

@@ -417,39 +417,50 @@ export function categorizeMerchant(
     };
   }
 
-  // 5. Refunds & Credits Check (Refund decreases expenses, never counted as regular income!)
-  if (
-    (combined.includes('זיכוי') && !combined.includes('זיכוי שכר')) ||
-    combined.includes('החזר כספי') ||
-    combined.includes('ביטול עסקה') ||
-    combined.includes('החזר חיוב') ||
-    combined.includes('זיכוי כרטיס') ||
-    combined.includes('refund') ||
-    combined.includes('reversal')
-  ) {
-    return {
-      category: 'החזרים וזיכויים',
-      type: 'refund',
-      confidenceScore: 0.95,
-      isInternalTransfer: false,
-      needsReview: false,
-    };
-  }
-
-  // 6. Real Income Check (Salary, allowances, pensions, dividends, check deposits)
+  // 5. Real Income Check (Salary, allowances, pensions, dividends, check deposits, Israeli payroll clearing)
   if (
     combined.includes('משכורת') ||
     combined.includes('שכר עבודה') ||
     combined.includes('העברת שכר') ||
     combined.includes('שכר חודשי') ||
     combined.includes('זיכוי שכר') ||
-    (combined.includes('שכר') && !combined.includes('שכר דירה') && !combined.includes('שכר לימוד') && !combined.includes('שכירות')) ||
+    combined.includes('הפקדת שכר') ||
+    combined.includes('משכורות') ||
+    (combined.includes('שכר') &&
+      !combined.includes('שכר דירה') &&
+      !combined.includes('שכר לימוד') &&
+      !combined.includes('שכירות') &&
+      !combined.includes('דמי שכירות') &&
+      !combined.includes('שכר טרחה')) ||
+    combined.includes('מופת') ||
+    combined.includes('מופ"ת') ||
+    combined.includes('מופ״ת') ||
+    combined.includes('מתש') ||
+    combined.includes('מת"ש') ||
+    combined.includes('מת״ש') ||
+    combined.includes('מסב') ||
+    combined.includes('מס"ב') ||
+    combined.includes('מס״ב') ||
+    combined.includes('חילן') ||
+    combined.includes('hilan') ||
+    combined.includes('מלם שכר') ||
+    combined.includes('מלם-שכר') ||
+    combined.includes('מלם') ||
+    combined.includes('הר-גל') ||
+    combined.includes('הר גל') ||
+    combined.includes('סינאל') ||
+    combined.includes('synel') ||
     combined.includes('ביטוח לאומי') ||
     combined.includes('קצבת ילדים') ||
     combined.includes('קצבת זקנה') ||
     combined.includes('קצבת נכות') ||
+    combined.includes('קצבת שארים') ||
     combined.includes('דמי לידה') ||
     combined.includes('דמי אבטלה') ||
+    combined.includes('קצבה') ||
+    combined.includes('קצבת') ||
+    combined.includes('גמלה') ||
+    combined.includes('גימלה') ||
     combined.includes('הפקדת צ\'ק') ||
     combined.includes('הפקדת שיק') ||
     combined.includes('הפקדת שק') ||
@@ -468,6 +479,28 @@ export function categorizeMerchant(
       category: 'משכורת והכנסות',
       type: 'income',
       confidenceScore: 0.96,
+      isInternalTransfer: false,
+      needsReview: false,
+    };
+  }
+
+  // 6. Explicit Refunds & Credits Check (Requires explicit refund words: החזר כספי, ביטול עסקה, החזר חיוב)
+  if (
+    combined.includes('החזר כספי') ||
+    combined.includes('ביטול עסקה') ||
+    combined.includes('החזר חיוב') ||
+    combined.includes('זיכוי בגין ביטול') ||
+    (combined.includes('החזר') &&
+      !combined.includes('החזר מס') &&
+      !combined.includes('החזר הלוואה') &&
+      !combined.includes('החזר משכנתא')) ||
+    combined.includes('refund') ||
+    combined.includes('reversal')
+  ) {
+    return {
+      category: 'החזרים וזיכויים',
+      type: 'refund',
+      confidenceScore: 0.95,
       isInternalTransfer: false,
       needsReview: false,
     };
@@ -982,6 +1015,8 @@ function buildTransactionObject(params: {
     finalCategory = 'החזרים וזיכויים';
   } else if (finalType === 'income' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי')) {
     finalCategory = 'משכורת והכנסות';
+  } else if (finalType === 'other' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי' || !finalCategory)) {
+    finalCategory = 'אחר / לבירור';
   }
 
   const confidenceLevel: ConfidenceLevel = classification.isUserRule

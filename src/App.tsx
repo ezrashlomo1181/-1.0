@@ -19,6 +19,7 @@ import {
 } from './services/storage';
 import {
   Transaction,
+  TransactionType,
   LearnedRule,
   BudgetCategory,
   FinancialGoal,
@@ -157,12 +158,31 @@ export default function App() {
     transactionId: string,
     chosenCategory: string,
     userNotes: string,
-    createRuleOption: 'all_similar' | 'exact_only' | 'none'
+    createRuleOption: 'all_similar' | 'exact_only' | 'none',
+    chosenType?: TransactionType
   ) => {
     setState((prev) => {
       const targetTx = prev.transactions.find((t) => t.id === transactionId);
       const pattern = targetTx?.merchant || chosenCategory;
-      const txType = targetTx?.type || 'expense';
+
+      // Determine effective type:
+      // 1. Explicit chosenType from user if provided
+      // 2. Or deduced from category:
+      //    'משכורת והכנסות' / 'הכנסות' -> 'income'
+      //    'החזרים וזיכויים' -> 'refund'
+      //    'העברות פנימיות' / 'העברות ומזומן' -> 'transfer'
+      //    else targetTx.type or 'expense'
+      const effectiveType: TransactionType = chosenType || (
+        chosenCategory === 'משכורת והכנסות' || chosenCategory === 'הכנסות'
+          ? 'income'
+          : chosenCategory === 'החזרים וזיכויים'
+          ? 'refund'
+          : chosenCategory === 'העברות פנימיות' || chosenCategory === 'העברות ומזומן'
+          ? 'transfer'
+          : targetTx?.type || 'expense'
+      );
+
+      const isTransfer = effectiveType === 'transfer';
 
       let newRules = [...prev.learnedRules];
       let ruleToSave: LearnedRule | null = null;
@@ -173,9 +193,9 @@ export default function App() {
           pattern,
           applyTo: createRuleOption,
           assignedCategory: chosenCategory,
-          assignedType: txType,
+          assignedType: effectiveType,
           createdAt: new Date().toISOString().split('T')[0],
-          userPromptBasis: `אישור משתמש עבור ${pattern}`,
+          userPromptBasis: `אישור משתמש עבור ${pattern} (${effectiveType})`,
           timesApplied: 1,
         };
 
@@ -196,7 +216,10 @@ export default function App() {
           return {
             ...t,
             category: chosenCategory,
+            type: effectiveType,
+            isInternalTransfer: isTransfer,
             needsReview: false,
+            reviewReason: undefined,
             userConfirmed: true,
             confidenceScore: 1.0,
             confidenceLevel: 'high' as const,
@@ -212,7 +235,10 @@ export default function App() {
           return {
             ...t,
             category: chosenCategory,
+            type: effectiveType,
+            isInternalTransfer: isTransfer,
             needsReview: false,
+            reviewReason: undefined,
             userConfirmed: true,
             confidenceScore: 1.0,
             confidenceLevel: 'high' as const,

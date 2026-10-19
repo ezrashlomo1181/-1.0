@@ -365,6 +365,11 @@ console.log('\n--- Test 7: Apply Restore with User Isolation ---');
   assert(preSnapshot?.state.transactions.length === 2, 'Pre-restore snapshot preserved previous 2 transactions');
 }
 
+// Clear mock storage so isolated tests do not leak into other test suites
+if ((globalThis as any).localStorage?.clear) {
+  (globalThis as any).localStorage.clear();
+}
+
 console.log(`\n======================================================================`);
 console.log(`TEST SUITE SUMMARY: ${passedCount} passed, ${failedCount} failed`);
 console.log(`======================================================================\n`);
