@@ -218,16 +218,18 @@ export function calculateCashFlowForPeriod(
       }
       // Any other inflow is deliberately held out of totals until classified.
     } else if (direction === 'outflow') {
-      if (tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment' || tx.type === 'debt' || tx.type === 'investment_contribution') {
+      if (tx.type === 'transfer' || tx.type === 'investment_withdrawal') {
+        transfers += amount;
+      } else {
+        // Direction is the accounting source of truth: an outflow cannot be income or a refund.
+        // Count it as spending even if its semantic type is contradictory, so cash leaving the
+        // account is not silently lost from reports. The parser flags such contradictions for review.
         grossExpenses += amount;
         const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
         curr.gross += amount;
         curr.items.push(tx);
         categoryMap.set(cat, curr);
-      } else if (tx.type === 'transfer' || tx.type === 'investment_withdrawal') {
-        transfers += amount;
       }
-      // An outflow incorrectly marked income/refund is not counted as income/refund.
     } else if (!direction) {
       // Compatibility for historical transactions created before flowDirection existed.
       if (tx.type === 'income') {
