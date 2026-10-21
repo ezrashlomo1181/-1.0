@@ -211,6 +211,53 @@ runTest('Scenario 5: loan_received enters cash flow without inflating operating 
   assert.strictEqual(period.netCashFlow, 12000 + 45000, 'תזרים מזומנים בפועל כולל את תקבול ההלוואה');
 });
 
+
+runTest('Explicit unknown flow direction is quarantined and counted as an anomaly', () => {
+  const unknownTx = createTx({ amount: 900, type: 'expense', flowDirection: 'unknown' });
+  const period = calculateCashFlowForPeriod([unknownTx], '2026-09');
+  assert.strictEqual(period.grossExpenses, 0);
+  assert.strictEqual(period.anomaliesCount, 1);
+});
+
+runTest('Independent refund increases cash flow but does not offset expenses', () => {
+  const expenseTx = createTx({ amount: 500, type: 'expense', flowDirection: 'outflow' });
+  const refundTx = createTx({
+    amount: 200, type: 'refund', flowDirection: 'inflow',
+    deductsFromExpense: false, isIndependentRefund: true,
+  });
+  const period = calculateCashFlowForPeriod([expenseTx, refundTx], '2026-09');
+  assert.strictEqual(period.expenses, 500, 'Independent refund must not reduce reported expenses');
+  assert.strictEqual(period.netCashFlow, -300, 'Independent refund still counts as cash received');
+  assert.strictEqual(period.refunds, 0, 'Independent refund is not an expense-offsetting refund');
+});
+
+runTest('Refund linked to a non-expense does not inherit its category', () => {
+  const linkedIncome = createTx({
+    id: 'linked-income', amount: 1000, type: 'income',
+    category: 'משכורת והכנסות', flowDirection: 'inflow',
+  });
+  const refundTx = createTx({
+    amount: 100, type: 'refund', category: 'החזר לא מסווג',
+    flowDirection: 'inflow', linkedExpenseId: 'linked-income',
+  });
+  const period = calculateCashFlowForPeriod([linkedIncome, refundTx], '2026-09');
+  assert.ok(period.categoryBreakdown.some((c) => c.category === 'החזר לא מסווג'));
+  assert.ok(!period.categoryBreakdown.some((c) => c.category === 'משכורת והכנסות'));
+});
+
+runTest('Loan and independent refund receipts do not inflate operating savings rate', () => {
+  const salaryTx = createTx({ amount: 1000, type: 'income', flowDirection: 'inflow' });
+  const expenseTx = createTx({ amount: 400, type: 'expense', flowDirection: 'outflow' });
+  const loanTx = createTx({ amount: 5000, type: 'loan_received', flowDirection: 'inflow' });
+  const independentRefund = createTx({
+    amount: 3000, type: 'refund', flowDirection: 'inflow', deductsFromExpense: false,
+  });
+  const period = calculateCashFlowForPeriod([salaryTx, expenseTx, loanTx, independentRefund], '2026-09');
+  assert.strictEqual(period.operatingSavings, 600);
+  assert.strictEqual(period.savingsRate, 60);
+  assert.strictEqual(period.netCashFlow, 8600);
+});
+
 console.log(`\nStage 1 Base Calculations Summary: ${passedCount} passed, ${failedCount} failed.`);
 if (failedCount > 0) {
   process.exit(1);
