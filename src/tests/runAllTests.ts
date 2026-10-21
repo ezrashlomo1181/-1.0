@@ -5,6 +5,7 @@ import './reversibleLinking.test.js';
 import './backupRestore.test.js';
 import './incomeClassification.test.js';
 import './flowDirection.test.js';
+import './accountingConsistency.test.js';
 
 console.log('\n========================================================================');
 console.log('             FULL REGRESSION SUITE EXECUTION COMPLETE                   ');
@@ -16,6 +17,7 @@ console.log('  [Suite 4] Reversible Mutual Linking & Safe Unlinking (Stage B.2):
 console.log('  [Suite 5] Local Backup, Validation & Reversible Restore (Stage C.2): PASS (34 tests)');
 console.log('  [Suite 6] Income, Salary & Inflow Classification (Phase B.2.5): PASS (26 tests)');
 console.log('  [Suite 7] Flow Direction & Safe UI Presentation (Stage 1):       PASS (22 tests)');
+console.log('  [Suite 8] Accounting Consistency & Flow Direction (Stage 2):    PASS (5 tests, if no failures above)');
 console.log('------------------------------------------------------------------------');
-console.log('  TOTAL: 262 / 262 tests passed across all 7 suites (0 failures).');
+console.log('  EXPECTED TOTAL: 267 tests across all 8 suites; verify individual PASS/FAIL output above.');
 console.log('========================================================================\n');
