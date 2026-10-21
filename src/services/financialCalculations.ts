@@ -182,6 +182,7 @@ export function calculateCashFlowForPeriod(
   let grossExpenses = 0;
   let refunds = 0;
   let transfers = 0;
+  let financingInflows = 0;
 
   // Category tracking with refund deduction
   const categoryMap = new Map<string, { gross: number; refunds: number; items: Transaction[] }>();
@@ -195,6 +196,8 @@ export function calculateCashFlowForPeriod(
       income += tx.amount;
       const src = tx.merchant || 'הכנסה';
       incomeSourcesMap.set(src, (incomeSourcesMap.get(src) || 0) + tx.amount);
+    } else if (tx.type === 'loan_received') {
+      financingInflows += Math.abs(tx.amount);
     } else if (tx.type === 'refund') {
       refunds += Math.abs(tx.amount);
       const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
@@ -212,17 +215,24 @@ export function calculateCashFlowForPeriod(
     }
   }
 
-  // Net expenses: gross expenses minus refunds
-  const netExpenses = Math.max(0, grossExpenses - refunds);
-  const netCashFlow = income - netExpenses;
+  // Net expenses: gross expenses minus refunds.
+  // If refunds exceed gross expenses, net expenses can be negative (reflecting a net credit balance).
+  const netExpenses = grossExpenses - refunds;
+
+  // Actual cash flow: actual cash received minus actual payments made.
+  // Inflows: operating income + cash refunds received + financing/loan inflows
+  // Outflows: gross expenses paid (consumption, fees, loan payments)
+  const actualReceipts = income + refunds + financingInflows;
+  const actualPayments = grossExpenses;
+  const netCashFlow = actualReceipts - actualPayments;
   const savingsRate = income > 0 ? Math.round((Math.max(0, netCashFlow) / income) * 100) : 0;
 
-  // Build category summaries with net expenses
+  // Build category summaries with net expenses (allows negative net amounts / credit balance)
   const categoryBreakdown: CategorySummary[] = [];
   categoryMap.forEach((val, cat) => {
-    const netCatAmount = Math.max(0, val.gross - val.refunds);
-    if (netCatAmount > 0 || val.items.length > 0) {
-      const pct = netExpenses > 0 ? Math.round((netCatAmount / netExpenses) * 100) : 0;
+    const netCatAmount = val.gross - val.refunds;
+    if (netCatAmount !== 0 || val.items.length > 0) {
+      const pct = netExpenses > 0 ? Math.round((Math.max(0, netCatAmount) / netExpenses) * 100) : 0;
       categoryBreakdown.push({
         category: cat,
         amount: Math.round(netCatAmount),

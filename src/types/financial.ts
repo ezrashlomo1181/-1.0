@@ -6,9 +6,19 @@ export type TransactionType =
   | 'investment_contribution'
   | 'investment_withdrawal'
   | 'loan_payment'
+  | 'loan_received'
   | 'debt'
   | 'fee'
   | 'other';
+
+export type ReconciliationStatus =
+  | 'unreconciled'
+  | 'reconciled'
+  | 'partial'
+  | 'settlement_matched'
+  | 'unverified_pending_review'
+  | 'independent_charge'
+  | 'pending_verification';
 
 export type ConfidenceLevel = 'high' | 'medium' | 'low';
 
@@ -55,7 +65,7 @@ export interface EnrichmentSnapshot {
   originalCategory: string;
   originalDate: string;
   originalTargetOriginalDate?: string;
-  originalReconciliationStatus?: 'unreconciled' | 'reconciled' | 'partial' | 'settlement_matched';
+  originalReconciliationStatus?: ReconciliationStatus;
   originalNeedsReview: boolean;
   originalReviewReason?: string;
   // Applied enriched values to detect post-enrichment manual modifications
@@ -112,7 +122,7 @@ export interface Transaction {
   cyclePeriod?: string; // e.g. "2026-09-10_to_2026-10-09"
   rawText?: string;
   isInternalTransfer?: boolean; // if true, exclude from income/expense calculations
-  reconciliationStatus?: 'unreconciled' | 'reconciled' | 'partial' | 'settlement_matched';
+  reconciliationStatus?: ReconciliationStatus;
   linkedTransactionIds?: string[];
   reconciliationEvidence?: string;
   isAggregateSettlement?: boolean; // true if bank consolidated card debit matched to detailed transactions
