@@ -112,6 +112,8 @@ export interface DetailedCashFlowPeriod {
   transactions: Transaction[];
   isCurrentMonth: boolean;
   isFuture: boolean;
+  anomaliesCount?: number;
+  operatingSavings?: number;
 }
 
 export interface PersonalHistoricalAverages {
@@ -175,6 +177,9 @@ export function calculateCashFlowForPeriod(
     monthKey = availableMonths[0] || CURRENT_APP_MONTH;
   }
 
+  // Pre-index all transactions to look up linked expenses for refunds across dataset
+  const allTxMap = new Map<string, Transaction>(transactions.map((t) => [t.id, t]));
+
   // Filter transactions belonging to this exact month
   const periodTxs = validTransactions.filter((t) => t.date && t.date.startsWith(monthKey!));
 
@@ -183,6 +188,7 @@ export function calculateCashFlowForPeriod(
   let refunds = 0;
   let transfers = 0;
   let financingInflows = 0;
+  let anomaliesCount = 0;
 
   // Category tracking with refund deduction
   const categoryMap = new Map<string, { gross: number; refunds: number; items: Transaction[] }>();
@@ -190,7 +196,36 @@ export function calculateCashFlowForPeriod(
   const incomeSourcesMap = new Map<string, number>();
 
   for (const tx of periodTxs) {
-    const cat = tx.category || 'אחר / ללא סיווג';
+    const flowDir = tx.flowDirection;
+
+    // CONTRADICTION DETECTION & SAFETY QUARANTINE:
+    // If flowDirection directly contradicts transaction type:
+    // 1. type === 'income' but flowDirection === 'outflow': Money left account, cannot be income!
+    // 2. type === 'expense' (or fee/loan_payment) but flowDirection === 'inflow': Money entered account, cannot be expense!
+    // 3. type === 'refund' but flowDirection === 'outflow': Refund cannot be an outflow!
+    // 4. type === 'loan_received' but flowDirection === 'outflow': Loan received cannot be an outflow!
+    const isContradiction =
+      (tx.type === 'income' && flowDir === 'outflow') ||
+      ((tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment') && flowDir === 'inflow') ||
+      (tx.type === 'refund' && flowDir === 'outflow') ||
+      (tx.type === 'loan_received' && flowDir === 'outflow');
+
+    if (isContradiction) {
+      anomaliesCount++;
+      // Safe quarantine: Do NOT corrupt financial calculations with contradictory amounts
+      continue;
+    }
+
+    let cat = tx.category || 'אחר / ללא סיווג';
+
+    // REFUND CATEGORY RESOLUTION:
+    // If transaction is a refund and has a linkedExpenseId, resolve to the original expense's category!
+    if (tx.type === 'refund' && tx.linkedExpenseId) {
+      const linked = allTxMap.get(tx.linkedExpenseId);
+      if (linked && linked.category) {
+        cat = linked.category;
+      }
+    }
 
     if (tx.type === 'income') {
       income += tx.amount;
@@ -199,11 +234,14 @@ export function calculateCashFlowForPeriod(
     } else if (tx.type === 'loan_received') {
       financingInflows += Math.abs(tx.amount);
     } else if (tx.type === 'refund') {
-      refunds += Math.abs(tx.amount);
-      const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
-      curr.refunds += Math.abs(tx.amount);
-      curr.items.push(tx);
-      categoryMap.set(cat, curr);
+      const shouldDeduct = tx.deductsFromExpense !== false;
+      if (shouldDeduct) {
+        refunds += Math.abs(tx.amount);
+        const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
+        curr.refunds += Math.abs(tx.amount);
+        curr.items.push(tx);
+        categoryMap.set(cat, curr);
+      }
     } else if (tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment') {
       grossExpenses += Math.abs(tx.amount);
       const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
@@ -225,7 +263,14 @@ export function calculateCashFlowForPeriod(
   const actualReceipts = income + refunds + financingInflows;
   const actualPayments = grossExpenses;
   const netCashFlow = actualReceipts - actualPayments;
-  const savingsRate = income > 0 ? Math.round((Math.max(0, netCashFlow) / income) * 100) : 0;
+
+  // Operational Savings & Savings Rate:
+  // Derived strictly from operational earnings (income) vs operating expenses,
+  // preventing loans, capital deposits or excessive refunds from falsely inflating the operational savings rate.
+  const operatingSavings = income - Math.max(0, netExpenses);
+  const savingsRate = income > 0
+    ? Math.min(100, Math.max(0, Math.round(((income - netExpenses) / income) * 100)))
+    : 0;
 
   // Build category summaries with net expenses (allows negative net amounts / credit balance)
   const categoryBreakdown: CategorySummary[] = [];
@@ -271,6 +316,8 @@ export function calculateCashFlowForPeriod(
     transactions: periodTxs,
     isCurrentMonth: monthKey === CURRENT_APP_MONTH,
     isFuture: monthKey! > CURRENT_APP_MONTH,
+    anomaliesCount,
+    operatingSavings: Math.round(operatingSavings),
   };
 }
 
@@ -291,7 +338,7 @@ export function calculateMonthlyCashFlow(
   return {
     monthlyIncome: period.income,
     monthlyExpenses: period.expenses,
-    monthlySavings: Math.max(0, period.netCashFlow),
+    monthlySavings: period.operatingSavings !== undefined ? period.operatingSavings : Math.max(0, period.income - Math.max(0, period.expenses)),
     savingsRate: period.savingsRate,
     liquidRunwayMonths,
   };
