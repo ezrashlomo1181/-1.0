@@ -954,6 +954,7 @@ export function buildTransactionObject(params: {
   isCreditRow: boolean;
   isDebitRow: boolean;
   amountIsNegative: boolean;
+  flowDirection?: 'inflow' | 'outflow' | 'unknown';
   institutionInfo: ReturnType<typeof detectInstitution>;
   sourceFileName: string;
   occurrence?: number;
@@ -969,6 +970,7 @@ export function buildTransactionObject(params: {
     isCreditRow,
     isDebitRow,
     amountIsNegative,
+    flowDirection: sourceFlowDirection,
     institutionInfo,
     sourceFileName,
     occurrence,
@@ -1012,7 +1014,7 @@ export function buildTransactionObject(params: {
     type: classification.type,
   });
 
-  const finalType = validated.type;
+  let finalType = validated.type;
   let finalCategory = validated.category;
   if (finalType === 'refund' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי')) {
     finalCategory = 'החזרים וזיכויים';
@@ -1028,8 +1030,8 @@ export function buildTransactionObject(params: {
     ? 'high'
     : 'medium';
 
-  const needsReview = classification.needsReview || validated.needsReview;
-  const reviewReason = validated.reviewReason || classification.reviewReason;
+  let needsReview = classification.needsReview || validated.needsReview;
+  let reviewReason = validated.reviewReason || classification.reviewReason;
 
   const docRole = identifyDocumentRole({
     sourceDocument: sourceFileName,
@@ -1108,6 +1110,66 @@ export function buildTransactionObject(params: {
       // Rule 11: Unidentified source with single column: cannot assume direction without explicit columns
       flowDirection = 'unknown';
     }
+  }
+
+  // A source parser with explicit evidence takes precedence over inference from semantic type.
+  if (sourceFlowDirection === 'inflow' || sourceFlowDirection === 'outflow' || sourceFlowDirection === 'unknown') {
+    flowDirection = sourceFlowDirection;
+  }
+
+  const combinedEvidence = `${effectiveMerchant} ${effectiveDescription} ${rawCategory}`.toLowerCase();
+  const salaryEvidence = [
+    'משכורת', 'שכר עבודה', 'הפקדת שכר', 'מופ"ת', 'מופת', 'מת"ש', 'מתש',
+    'מס"ב', 'מסב', 'חילן', 'מלם', 'ביטוח לאומי', 'קצבה', 'גמלה', 'דיבידנד', 'ריבית זכות'
+  ].some((word) => combinedEvidence.includes(word.toLowerCase()));
+  const refundEvidence = ['זיכוי', 'החזר כספי', 'ביטול עסקה', 'refund', 'reversal']
+    .some((word) => combinedEvidence.includes(word));
+  const transferEvidence = [
+    'העברה עצמית', 'העברה בין חשבונות', 'העברה לחיסכון', 'העברה מחשבון',
+    'העברה לחשבון', 'הפקדה לפיקדון'
+  ].some((word) => combinedEvidence.includes(word));
+  const consumerCategoryEvidence = [
+    'קניות וביגוד', 'ביגוד', 'קניות', 'מזון וסופר', 'סופרמרקט',
+    'מסעדות', 'בריאות ופארם', 'פארם', 'תחבורה ורכב'
+  ].some((word) => finalCategory.includes(word));
+
+  if (flowDirection === 'unknown') {
+    finalType = 'other';
+    finalCategory = 'אחר / לבירור';
+    needsReview = true;
+    reviewReason = 'לא ניתן לקבוע את כיוון תנועת הכסף מתוך נתוני המקור. העסקה הושהתה מחישובי הכנסות והוצאות עד לאימות.';
+  } else if (flowDirection === 'outflow' && finalType === 'income') {
+    finalType = transferEvidence ? 'transfer' : 'expense';
+    if (transferEvidence) finalCategory = 'העברות ומזומן';
+    needsReview = true;
+    reviewReason = 'זוהתה יציאת כספים (Outflow) שסווגה כהכנסה. נדרשת בדיקה.';
+  } else if (flowDirection === 'outflow' && (finalType === 'refund' || finalType === 'debt')) {
+    finalType = 'expense';
+    needsReview = true;
+    reviewReason = 'כיוון התנועה הוא יציאת כספים אך סוג העסקה אינו תואם. נדרשת בדיקה.';
+  } else if (flowDirection === 'inflow' && finalType === 'expense') {
+    if (salaryEvidence) {
+      finalType = 'income';
+      finalCategory = 'משכורת והכנסות';
+    } else if (refundEvidence || (isCreditCardSource && consumerCategoryEvidence)) {
+      finalType = 'refund';
+      if (!finalCategory || finalCategory === 'כללי' || finalCategory === 'אחר / ללא סיווג') {
+        finalCategory = 'החזרים וזיכויים';
+      }
+    } else if (transferEvidence) {
+      finalType = 'transfer';
+      finalCategory = 'העברות ומזומן';
+    } else {
+      finalType = 'other';
+      finalCategory = 'אחר / לבירור';
+      needsReview = true;
+      reviewReason = 'זוהתה כניסת כספים (Inflow) שאינה מזוהה כמשכורת, החזר או העברה. נדרש אימות משתמש.';
+    }
+  } else if (flowDirection === 'inflow' && (finalType === 'fee' || finalType === 'loan_payment')) {
+    finalType = 'other';
+    finalCategory = 'אחר / לבירור';
+    needsReview = true;
+    reviewReason = 'כיוון כניסת הכספים אינו תואם לסוג העסקה. נדרש אימות משתמש.';
   }
 
   return {
