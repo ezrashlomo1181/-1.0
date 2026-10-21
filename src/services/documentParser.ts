@@ -1126,7 +1126,7 @@ export function buildTransactionObject(params: {
     category: finalCategory,
     type: finalType,
     isRecurring: false,
-    isInternalTransfer: classification.isInternalTransfer,
+    isInternalTransfer: finalType === 'transfer' && (transferEvidence || classification.isInternalTransfer),
     confidenceScore: classification.confidenceScore,
     confidenceLevel,
     needsReview,
@@ -2508,8 +2508,11 @@ export async function parseImageFile(file: File): Promise<ParseResult> {
         description: item.description || merchant,
         rawCategory,
         isCreditRow: typeof item.isCredit === 'boolean' ? item.isCredit : item.type === 'income',
-        isDebitRow: typeof item.isCredit === 'boolean' ? !item.isCredit : item.type === 'expense',
-        amountIsNegative: parsedAmount.isNegative || item.type === 'refund',
+        isDebitRow: typeof item.isDebit === 'boolean'
+          ? item.isDebit
+          : typeof item.isCredit === 'boolean' ? !item.isCredit : item.type === 'expense',
+        amountIsNegative: parsedAmount.isNegative || Boolean(item.amountIsNegative) || item.type === 'refund',
+        flowDirection: item.flowDirection,
         institutionInfo: instInfo,
         sourceFileName: file.name,
       });
@@ -2593,8 +2596,11 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
         description: item.description || merchant,
         rawCategory,
         isCreditRow: typeof item.isCredit === 'boolean' ? item.isCredit : item.type === 'income',
-        isDebitRow: typeof item.isCredit === 'boolean' ? !item.isCredit : item.type === 'expense',
-        amountIsNegative: parsedAmount.isNegative || item.type === 'refund',
+        isDebitRow: typeof item.isDebit === 'boolean'
+          ? item.isDebit
+          : typeof item.isCredit === 'boolean' ? !item.isCredit : item.type === 'expense',
+        amountIsNegative: parsedAmount.isNegative || Boolean(item.amountIsNegative) || item.type === 'refund',
+        flowDirection: item.flowDirection,
         institutionInfo: instInfo,
         sourceFileName: file.name,
       });
