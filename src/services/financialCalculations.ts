@@ -186,6 +186,8 @@ export function calculateCashFlowForPeriod(
   let income = 0;
   let grossExpenses = 0;
   let refunds = 0;
+  // Total cash refunds received, including refunds that do not offset spending.
+  let refundReceipts = 0;
   let transfers = 0;
   let financingInflows = 0;
   let anomaliesCount = 0;
@@ -205,6 +207,8 @@ export function calculateCashFlowForPeriod(
     // 3. type === 'refund' but flowDirection === 'outflow': Refund cannot be an outflow!
     // 4. type === 'loan_received' but flowDirection === 'outflow': Loan received cannot be an outflow!
     const isContradiction =
+      // An explicitly unknown direction is not safe to classify automatically.
+      flowDir === 'unknown' ||
       (tx.type === 'income' && flowDir === 'outflow') ||
       ((tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment') && flowDir === 'inflow') ||
       (tx.type === 'refund' && flowDir === 'outflow') ||
@@ -222,7 +226,9 @@ export function calculateCashFlowForPeriod(
     // If transaction is a refund and has a linkedExpenseId, resolve to the original expense's category!
     if (tx.type === 'refund' && tx.linkedExpenseId) {
       const linked = allTxMap.get(tx.linkedExpenseId);
-      if (linked && linked.category) {
+      const linkedIsExpense = linked &&
+        (linked.type === 'expense' || linked.type === 'fee' || linked.type === 'loan_payment');
+      if (linkedIsExpense && linked.category) {
         cat = linked.category;
       }
     }
@@ -234,6 +240,8 @@ export function calculateCashFlowForPeriod(
     } else if (tx.type === 'loan_received') {
       financingInflows += Math.abs(tx.amount);
     } else if (tx.type === 'refund') {
+      // Every valid refund is a cash receipt, even when it must not offset spending.
+      refundReceipts += Math.abs(tx.amount);
       const shouldDeduct = tx.deductsFromExpense !== false;
       if (shouldDeduct) {
         refunds += Math.abs(tx.amount);
@@ -260,7 +268,7 @@ export function calculateCashFlowForPeriod(
   // Actual cash flow: actual cash received minus actual payments made.
   // Inflows: operating income + cash refunds received + financing/loan inflows
   // Outflows: gross expenses paid (consumption, fees, loan payments)
-  const actualReceipts = income + refunds + financingInflows;
+  const actualReceipts = income + refundReceipts + financingInflows;
   const actualPayments = grossExpenses;
   const netCashFlow = actualReceipts - actualPayments;
 
@@ -269,7 +277,7 @@ export function calculateCashFlowForPeriod(
   // preventing loans, capital deposits or excessive refunds from falsely inflating the operational savings rate.
   const operatingSavings = income - Math.max(0, netExpenses);
   const savingsRate = income > 0
-    ? Math.min(100, Math.max(0, Math.round(((income - netExpenses) / income) * 100)))
+    ? Math.min(100, Math.max(0, Math.round((operatingSavings / income) * 100)))
     : 0;
 
   // Build category summaries with net expenses (allows negative net amounts / credit balance)
@@ -384,7 +392,7 @@ export function calculatePersonalHistoricalAverages(
     const mData = calculateCashFlowForPeriod(transactions, mKey);
     totalHistoricalExpenses += mData.expenses;
     totalHistoricalIncome += mData.income;
-    totalHistoricalSavings += Math.max(0, mData.netCashFlow);
+    totalHistoricalSavings += Math.max(0, mData.operatingSavings ?? (mData.income - Math.max(0, mData.expenses)));
 
     for (const cat of mData.categoryBreakdown) {
       categoryTotals.set(cat.category, (categoryTotals.get(cat.category) || 0) + cat.amount);
@@ -458,7 +466,7 @@ export function getCashFlowHistory(
       monthLabel: period.monthLabel,
       income: period.income,
       expense: period.expenses,
-      savings: Math.max(0, period.netCashFlow),
+      savings: Math.max(0, period.operatingSavings ?? (period.income - Math.max(0, period.expenses))),
     });
   }
 
