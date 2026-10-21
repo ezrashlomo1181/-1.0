@@ -2569,11 +2569,9 @@ export async function parseImageFile(file: File): Promise<ParseResult> {
         merchant,
         description: item.description || merchant,
         rawCategory,
-        isCreditRow: typeof item.isCredit === 'boolean' ? item.isCredit : item.type === 'income',
-        isDebitRow: typeof item.isDebit === 'boolean'
-          ? item.isDebit
-          : typeof item.isCredit === 'boolean' ? !item.isCredit : item.type === 'expense',
-        amountIsNegative: parsedAmount.isNegative || Boolean(item.amountIsNegative) || item.type === 'refund',
+        isCreditRow: typeof item.isCredit === 'boolean' ? item.isCredit : false,
+        isDebitRow: typeof item.isDebit === 'boolean' ? item.isDebit : false,
+        amountIsNegative: parsedAmount.isNegative || Boolean(item.amountIsNegative),
         flowDirection: item.flowDirection,
         institutionInfo: instInfo,
         sourceFileName: file.name,
@@ -2657,11 +2655,9 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
         merchant,
         description: item.description || merchant,
         rawCategory,
-        isCreditRow: typeof item.isCredit === 'boolean' ? item.isCredit : item.type === 'income',
-        isDebitRow: typeof item.isDebit === 'boolean'
-          ? item.isDebit
-          : typeof item.isCredit === 'boolean' ? !item.isCredit : item.type === 'expense',
-        amountIsNegative: parsedAmount.isNegative || Boolean(item.amountIsNegative) || item.type === 'refund',
+        isCreditRow: typeof item.isCredit === 'boolean' ? item.isCredit : false,
+        isDebitRow: typeof item.isDebit === 'boolean' ? item.isDebit : false,
+        amountIsNegative: parsedAmount.isNegative || Boolean(item.amountIsNegative),
         flowDirection: item.flowDirection,
         institutionInfo: instInfo,
         sourceFileName: file.name,
