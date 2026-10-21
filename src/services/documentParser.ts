@@ -943,7 +943,7 @@ export async function decodeTextBuffer(buffer: ArrayBuffer): Promise<string> {
 // -------------------------------------------------------------
 // CENTRAL TRANSACTION BUILDER
 // -------------------------------------------------------------
-function buildTransactionObject(params: {
+export function buildTransactionObject(params: {
   date: string;
   billingDate?: string | null;
   amount: number;
@@ -1070,6 +1070,46 @@ function buildTransactionObject(params: {
     idempotencyKey: rowIdempotency,
   };
 
+  // 3. Deterministic Decision Table for Flow Direction (Stage 1)
+  let flowDirection: 'inflow' | 'outflow' | 'unknown' = 'unknown';
+
+  // Rule 1: Contradictory flags -> unknown
+  if (isCreditRow && isDebitRow) {
+    flowDirection = 'unknown';
+  }
+  // Rule 2 & 3: Explicit Credit column active
+  else if (isCreditRow && !isDebitRow) {
+    flowDirection = amountIsNegative ? 'unknown' : 'inflow';
+  }
+  // Rule 4, 5 & 6: Explicit Debit column active
+  else if (isDebitRow && !isCreditRow) {
+    if (isCreditCardSource) {
+      // In credit cards, negative amount or refund in debit/charge column is an inflow (refund)
+      flowDirection = amountIsNegative ? 'inflow' : 'outflow';
+    } else {
+      // In banks, negative in debit is contradictory
+      flowDirection = amountIsNegative ? 'unknown' : 'outflow';
+    }
+  }
+  // Single amount column or neither flag pre-set:
+  else {
+    const isVerifiedBank =
+      !isCreditCardSource &&
+      institutionInfo.accountId !== 'acc-general' &&
+      institutionInfo.defaultPayment === 'bank_transfer';
+
+    if (isVerifiedBank) {
+      // Rule 7 & 8: Verified bank with single amount column: negative = outflow, positive = inflow
+      flowDirection = amountIsNegative ? 'outflow' : 'inflow';
+    } else if (isCreditCardSource) {
+      // Rule 9 & 10: Verified credit card: positive = outflow (purchase charge), negative = inflow (refund)
+      flowDirection = amountIsNegative ? 'inflow' : 'outflow';
+    } else {
+      // Rule 11: Unidentified source with single column: cannot assume direction without explicit columns
+      flowDirection = 'unknown';
+    }
+  }
+
   return {
     id: initialTxId,
     date,
@@ -1082,6 +1122,7 @@ function buildTransactionObject(params: {
     accountId: institutionInfo.accountId,
     accountName: institutionInfo.accountName,
     paymentMethod: institutionInfo.defaultPayment,
+    flowDirection,
     category: finalCategory,
     type: finalType,
     isRecurring: false,
@@ -1489,13 +1530,24 @@ export function extractTransactionsFromRawRows(
       const debitVal = activeDebitCol !== -1 ? parseIsraeliAmount(row[activeDebitCol]) : null;
       const creditVal = activeCreditCol !== -1 ? parseIsraeliAmount(row[activeCreditCol]) : null;
 
-      if (creditVal && creditVal.amount > 0) {
-        txAmount = creditVal.amount;
+      const hasCredit = Boolean(creditVal && creditVal.amount > 0);
+      const hasDebit = Boolean(debitVal && debitVal.amount > 0);
+
+      if (hasCredit && hasDebit) {
+        txAmount = creditVal!.amount;
         isCreditRow = true;
-        foundValidAmount = true;
-      } else if (debitVal && debitVal.amount > 0) {
-        txAmount = debitVal.amount;
         isDebitRow = true;
+        amountIsNegative = creditVal!.isNegative || debitVal!.isNegative;
+        foundValidAmount = true;
+      } else if (hasCredit) {
+        txAmount = creditVal!.amount;
+        isCreditRow = true;
+        amountIsNegative = creditVal!.isNegative;
+        foundValidAmount = true;
+      } else if (hasDebit) {
+        txAmount = debitVal!.amount;
+        isDebitRow = true;
+        amountIsNegative = debitVal!.isNegative;
         foundValidAmount = true;
       }
     }
@@ -1517,22 +1569,6 @@ export function extractTransactionsFromRawRows(
         txAmount = parsedAmount.amount;
         amountIsNegative = parsedAmount.isNegative;
         foundValidAmount = true;
-
-        const isCard =
-          institutionInfo.defaultPayment === 'credit_card' ||
-          Boolean(institutionInfo.isCreditCardOnly) ||
-          sourceFileName.toLowerCase().includes('אשראי') ||
-          sourceFileName.toLowerCase().includes('כרטיס');
-
-        if (!isCard) {
-          if (amountIsNegative) {
-            isDebitRow = true;
-            isCreditRow = false;
-          } else {
-            isCreditRow = true;
-            isDebitRow = false;
-          }
-        }
       }
     }
 
@@ -1845,13 +1881,24 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
       const debitParsed = activeDebitCol !== -1 ? parseIsraeliAmount(cols[activeDebitCol]) : null;
       const creditParsed = activeCreditCol !== -1 ? parseIsraeliAmount(cols[activeCreditCol]) : null;
 
-      if (creditParsed && creditParsed.amount > 0) {
-        txAmount = creditParsed.amount;
+      const hasCredit = Boolean(creditParsed && creditParsed.amount > 0);
+      const hasDebit = Boolean(debitParsed && debitParsed.amount > 0);
+
+      if (hasCredit && hasDebit) {
+        txAmount = creditParsed!.amount;
         isCreditRow = true;
-        foundValidAmount = true;
-      } else if (debitParsed && debitParsed.amount > 0) {
-        txAmount = debitParsed.amount;
         isDebitRow = true;
+        amountIsNegative = creditParsed!.isNegative || debitParsed!.isNegative;
+        foundValidAmount = true;
+      } else if (hasCredit) {
+        txAmount = creditParsed!.amount;
+        isCreditRow = true;
+        amountIsNegative = creditParsed!.isNegative;
+        foundValidAmount = true;
+      } else if (hasDebit) {
+        txAmount = debitParsed!.amount;
+        isDebitRow = true;
+        amountIsNegative = debitParsed!.isNegative;
         foundValidAmount = true;
       }
     }
@@ -1871,22 +1918,6 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
         txAmount = parsed.amount;
         amountIsNegative = parsed.isNegative;
         foundValidAmount = true;
-
-        const isCard =
-          institutionInfo.defaultPayment === 'credit_card' ||
-          Boolean(institutionInfo.isCreditCardOnly) ||
-          fileName.toLowerCase().includes('אשראי') ||
-          fileName.toLowerCase().includes('כרטיס');
-
-        if (!isCard) {
-          if (amountIsNegative) {
-            isDebitRow = true;
-            isCreditRow = false;
-          } else {
-            isCreditRow = true;
-            isDebitRow = false;
-          }
-        }
       }
     }
 
@@ -2052,13 +2083,24 @@ export function parseHtmlContent(html: string, fileName: string): ParseResult {
         const debitParsed = debitCol !== -1 ? parseIsraeliAmount(cells[debitCol]) : null;
         const creditParsed = creditCol !== -1 ? parseIsraeliAmount(cells[creditCol]) : null;
 
-        if (creditParsed && creditParsed.amount > 0) {
-          txAmount = creditParsed.amount;
+        const hasCredit = Boolean(creditParsed && creditParsed.amount > 0);
+        const hasDebit = Boolean(debitParsed && debitParsed.amount > 0);
+
+        if (hasCredit && hasDebit) {
+          txAmount = creditParsed!.amount;
           isCreditRow = true;
-          foundValidAmount = true;
-        } else if (debitParsed && debitParsed.amount > 0) {
-          txAmount = debitParsed.amount;
           isDebitRow = true;
+          amountIsNegative = creditParsed!.isNegative || debitParsed!.isNegative;
+          foundValidAmount = true;
+        } else if (hasCredit) {
+          txAmount = creditParsed!.amount;
+          isCreditRow = true;
+          amountIsNegative = creditParsed!.isNegative;
+          foundValidAmount = true;
+        } else if (hasDebit) {
+          txAmount = debitParsed!.amount;
+          isDebitRow = true;
+          amountIsNegative = debitParsed!.isNegative;
           foundValidAmount = true;
         }
       }
@@ -2069,22 +2111,6 @@ export function parseHtmlContent(html: string, fileName: string): ParseResult {
           txAmount = parsed.amount;
           amountIsNegative = parsed.isNegative;
           foundValidAmount = true;
-
-          const isCard =
-            institutionInfo.defaultPayment === 'credit_card' ||
-            Boolean(institutionInfo.isCreditCardOnly) ||
-            fileName.toLowerCase().includes('אשראי') ||
-            fileName.toLowerCase().includes('כרטיס');
-
-          if (!isCard) {
-            if (amountIsNegative) {
-              isDebitRow = true;
-              isCreditRow = false;
-            } else {
-              isCreditRow = true;
-              isDebitRow = false;
-            }
-          }
         }
       }
 
@@ -2481,8 +2507,8 @@ export async function parseImageFile(file: File): Promise<ParseResult> {
         merchant,
         description: item.description || merchant,
         rawCategory,
-        isCreditRow: item.type === 'income' || item.isCredit,
-        isDebitRow: item.type === 'expense' || !item.isCredit,
+        isCreditRow: typeof item.isCredit === 'boolean' ? item.isCredit : item.type === 'income',
+        isDebitRow: typeof item.isCredit === 'boolean' ? !item.isCredit : item.type === 'expense',
         amountIsNegative: parsedAmount.isNegative || item.type === 'refund',
         institutionInfo: instInfo,
         sourceFileName: file.name,
@@ -2566,8 +2592,8 @@ export async function parsePdfFile(file: File): Promise<ParseResult> {
         merchant,
         description: item.description || merchant,
         rawCategory,
-        isCreditRow: item.type === 'income' || Boolean(item.isCredit),
-        isDebitRow: item.type === 'expense' || (!item.isCredit && item.type !== 'income'),
+        isCreditRow: typeof item.isCredit === 'boolean' ? item.isCredit : item.type === 'income',
+        isDebitRow: typeof item.isCredit === 'boolean' ? !item.isCredit : item.type === 'expense',
         amountIsNegative: parsedAmount.isNegative || item.type === 'refund',
         institutionInfo: instInfo,
         sourceFileName: file.name,

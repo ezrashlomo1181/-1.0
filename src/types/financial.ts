@@ -117,6 +117,7 @@ export interface Transaction {
   reconciliationEvidence?: string;
   isAggregateSettlement?: boolean; // true if bank consolidated card debit matched to detailed transactions
   isFuture?: boolean; // true if transaction date is in the future relative to current date
+  flowDirection?: 'inflow' | 'outflow' | 'unknown'; // Verified financial flow direction from source row
 
   // Multi-source and deduplication model (Stage 1)
   sourceRecords?: SourceRecord[];

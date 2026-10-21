@@ -20,6 +20,74 @@ interface TransactionsViewProps {
   onOpenTraceModal: (title: string, amount: number, txList: Transaction[]) => void;
 }
 
+export type DisplayDirection = 'inflow' | 'outflow' | 'unknown';
+
+/**
+ * Pure Read-Only Presentation Helper:
+ * Determines the visual flow direction without mutating the transaction or its saved type.
+ */
+export function getDisplayDirection(tx: Transaction): DisplayDirection {
+  // 1. Direct saved flowDirection from source row
+  if (tx.flowDirection) {
+    return tx.flowDirection;
+  }
+
+  // 2. Fallback for historical transactions without flowDirection:
+  // Check unambiguous explicit text evidence in description / rawText:
+  const raw = `${tx.merchant || ''} ${tx.description || ''} ${tx.rawText || ''}`.toLowerCase();
+
+  // A. Explicit Credit Evidence:
+  const hasExplicitCreditEvidence =
+    raw.includes('זיכוי') ||
+    raw.includes('החזר כספי') ||
+    raw.includes('החזרת פריט') ||
+    raw.includes('משכורת') ||
+    raw.includes('שכר עבודה') ||
+    raw.includes('העברת שכר') ||
+    raw.includes('הפקדת שכר') ||
+    raw.includes('זיכוי שכר') ||
+    raw.includes('מופת') ||
+    raw.includes('מופ"ת') ||
+    raw.includes('מופ״ת') ||
+    raw.includes('מתש') ||
+    raw.includes('מת"ש') ||
+    raw.includes('מת״ש') ||
+    raw.includes('מסב') ||
+    raw.includes('מס"ב') ||
+    raw.includes('מס״ב') ||
+    raw.includes('חילן') ||
+    raw.includes('מלם שכר') ||
+    raw.includes('מלם-שכר') ||
+    raw.includes('קצבת') ||
+    raw.includes('ביטוח לאומי') ||
+    raw.includes('הפקדת משכורת') ||
+    raw.includes('הפקדת שיק') ||
+    raw.includes('הפקדת צ\'ק') ||
+    raw.includes('הפקדת מזומן') ||
+    raw.includes('העברה לזכות') ||
+    (raw.includes('זכות') && !raw.includes('ריבית חובה') && !raw.includes('ביטול זכות'));
+
+  if (hasExplicitCreditEvidence) {
+    return 'inflow';
+  }
+
+  // B. Explicit Debit Evidence:
+  const hasExplicitDebitEvidence =
+    raw.includes('משיכת מזומן') ||
+    raw.includes('משיכה במכשיר') ||
+    raw.includes('העברה לחובה') ||
+    raw.includes('עמלת') ||
+    (raw.includes('חובה') && !raw.includes('מופת') && !raw.includes('מופ"ת') && !raw.includes('מופ״ת'));
+
+  if (hasExplicitDebitEvidence) {
+    return 'outflow';
+  }
+
+  // C. In the absence of explicit direction evidence, do NOT guess based on type: 'expense'!
+  // Mark as unknown so that the UI presents it neutrally without misleading +/- signs.
+  return 'unknown';
+}
+
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
   transactions,
   searchQuery,
@@ -264,25 +332,43 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       </td>
 
                       {/* Amount */}
-                      <td className="py-3 px-4 text-left font-mono font-bold whitespace-nowrap text-xs">
-                        <span
-                          className={
-                            tx.isInternalTransfer
-                              ? 'text-slate-400 line-through'
-                              : tx.type === 'income'
-                              ? 'text-[#059669]'
-                              : tx.type === 'refund'
-                              ? 'text-[#059669]'
-                              : 'text-[#BE123C]'
+                      <td className="py-3 px-4 text-left font-mono whitespace-nowrap text-xs">
+                        {(() => {
+                          const dir = getDisplayDirection(tx);
+                          if (tx.isInternalTransfer) {
+                            return (
+                              <span className="text-slate-400 dark:text-slate-500 line-through">
+                                ₪{Math.abs(tx.amount).toLocaleString()}
+                              </span>
+                            );
                           }
-                        >
-                          {tx.type === 'income'
-                            ? '+'
-                            : tx.type === 'refund'
-                            ? 'זיכוי +'
-                            : '-'}
-                          ₪{Math.abs(tx.amount).toLocaleString()}
-                        </span>
+                          if (dir === 'inflow') {
+                            return (
+                              <span className="text-emerald-700 dark:text-emerald-400 font-bold">
+                                {tx.type === 'refund' ? 'זיכוי +' : '+'}₪{Math.abs(tx.amount).toLocaleString()}
+                              </span>
+                            );
+                          }
+                          if (dir === 'outflow') {
+                            return (
+                              <span className="text-rose-700 dark:text-rose-400 font-bold">
+                                -₪{Math.abs(tx.amount).toLocaleString()}
+                              </span>
+                            );
+                          }
+                          // Neutral state for 'unknown' flow direction: no +/- signs, neutral color & badge
+                          return (
+                            <span
+                              className="text-slate-700 dark:text-slate-300 font-medium inline-flex items-center gap-1.5"
+                              title="כיוון תנועה אינו ודאי (מצב ניטרלי)"
+                            >
+                              <span>₪{Math.abs(tx.amount).toLocaleString()}</span>
+                              <span className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1 py-0.2 font-sans">
+                                לא נקבע
+                              </span>
+                            </span>
+                          );
+                        })()}
                       </td>
 
                       {/* Actions */}
