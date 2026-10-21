@@ -1131,7 +1131,7 @@ export function buildTransactionObject(params: {
     confidenceLevel,
     needsReview,
     reviewReason,
-    userConfirmed: confidenceLevel === 'high' || Boolean(classification.isUserRule),
+    userConfirmed: !needsReview && (confidenceLevel === 'high' || Boolean(classification.isUserRule)),
     sourceDocument: sourceFileName,
     sourceDocumentType: docRole,
     isFuture,
