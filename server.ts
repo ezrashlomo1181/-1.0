@@ -241,7 +241,9 @@ app.post('/api/ai/parse-document', async (req, res) => {
                   ? 'inflow'
                   : transferEvidence
                     ? 'unknown'
-                    : 'unknown'
+                    : isCreditCardSource
+                      ? 'outflow'
+                      : 'unknown'
       );
 
       // Check ATM (Always expense, never transfer!)
@@ -477,7 +479,9 @@ app.post('/api/ai/parse-document', async (req, res) => {
               ? (/ישראכרט|כאל|\\bcal\\b|\\bmax\\b|ויזה|אשראי|כרטיס/i.test(`${detectedInstitution} ${fileName}`) ? 'inflow' : 'outflow')
               : isIncomeCandidate || line.includes('זיכוי') || line.includes('החזר כספי')
                 ? 'inflow'
-                : 'unknown',
+                : (/ישראכרט|כאל|\\bcal\\b|\\bmax\\b|ויזה|אשראי|כרטיס/i.test(`${detectedInstitution} ${fileName}`)
+                  ? 'outflow'
+                  : 'unknown'),
             isCredit: amountIsNegative ? false : (isIncomeCandidate || line.includes('זיכוי') || line.includes('החזר כספי') ? true : undefined),
             isDebit: amountIsNegative ? true : undefined,
             type: isIncomeCandidate ? 'income' : (line.includes('זיכוי') || line.includes('החזר כספי') ? 'refund' : 'expense'),
