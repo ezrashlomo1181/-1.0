@@ -384,7 +384,7 @@ app.post('/api/ai/parse-document', async (req, res) => {
       const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const results: any[] = [];
       const dateRegex = /\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](\d{2,4})\b/g;
-      const amountRegex = /\b-?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})\b|\b-?\d+\.\d{2}\b/g;
+      const amountRegex = /(?<!\w)-?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})\b|(?<!\w)-?\d+\.\d{2}\b/g;
 
       for (const line of lines) {
         // Skip header / summary lines
