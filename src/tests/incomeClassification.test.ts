@@ -9,6 +9,7 @@ import {
 } from '../services/financialCalculations';
 import { Transaction, LearnedRule } from '../types/financial';
 import { INITIAL_TRANSACTIONS } from '../data/demoData';
+import { parseCsvContent } from '../services/documentParser';
 
 console.log('\n=== TEST SUITE: Income, Salary & Inflow Classification (Phase B.2.4) ===');
 
@@ -391,6 +392,254 @@ runTest('J.1: Initial demo data transactions preserve their types and classifica
   assert(cardSettlementTransfer);
   assert.strictEqual(cardSettlementTransfer.type, 'transfer');
   assert.strictEqual(cardSettlementTransfer.isInternalTransfer, true);
+});
+
+// -----------------------------------------------------------------------------
+// Group K: שלב ב׳.2.5 — תיקון ממוקד לבאג סיווג משכורות כהוצאות (תרחישים 1–9)
+// -----------------------------------------------------------------------------
+console.log('\n--- Group K: Stage B.2.5 Comprehensive Regression Scenarios ---');
+
+runTest('K.1 (Scenario 1): Salary in bank checking with isCreditRow=false is classified as income', () => {
+  const res = classifyTransactionSemantics({
+    merchant: 'מופ"ת חובה-י',
+    description: 'הפקדת קצבה / שכר',
+    isCreditRow: false, // In single-amount columns or raw calls, isCreditRow starts as false
+    isCreditCardSource: false,
+  });
+
+  assert.strictEqual(res.type, 'income', 'משכורת מזוהה בעו"ש חייבת להיות income גם אם isCreditRow=false');
+  assert.strictEqual(res.category, 'משכורת והכנסות');
+  assert.strictEqual(res.needsReview, false);
+});
+
+runTest('K.2 (Scenario 2): Salary with generic raw category "כללי" gets overridden to "משכורת והכנסות"', () => {
+  const res = classifyTransactionSemantics({
+    merchant: 'מופ"ת חובה-י',
+    description: 'זיכוי',
+    rawCategory: 'כללי',
+    isCreditRow: false,
+    isCreditCardSource: false,
+  });
+
+  assert.strictEqual(res.type, 'income');
+  assert.strictEqual(res.category, 'משכורת והכנסות', 'קטגוריית "כללי" נדרסת לקטגוריית "משכורת והכנסות"');
+  assert.strictEqual(res.needsReview, false);
+});
+
+runTest('K.3 (Scenario 3): End-to-end CSV import with single amount column (positive salary & negative expense)', () => {
+  const csvContent = [
+    'תאריך,תיאור פעולה,אסמכתא,סכום,קטגוריה',
+    '2026-09-01,מופת חובה-י,1001,2872.65,כללי',
+    '2026-09-02,שופרסל דיל סניף 4,1002,-450.00,כללי',
+    '2026-09-03,חילן שכר עבודה,1003,15000.00,',
+  ].join('\n');
+
+  const parsed = parseCsvContent(csvContent, 'leumi_bank_statement.csv');
+  assert.strictEqual(parsed.success, true);
+  assert.strictEqual(parsed.transactions.length, 3);
+
+  const salaryTx = parsed.transactions.find((t) => t.merchant.includes('מופת'));
+  assert(salaryTx, 'נמצאה עסקת מופת');
+  assert.strictEqual(salaryTx.type, 'income', 'עסקת מופת מסווגת כ-income');
+  assert.strictEqual(salaryTx.category, 'משכורת והכנסות', 'עסקת מופת מסווגת כמשכורת והכנסות ולא כללי');
+  assert.strictEqual(salaryTx.amount, 2872.65);
+
+  const hilanTx = parsed.transactions.find((t) => t.merchant.includes('חילן'));
+  assert(hilanTx, 'נמצאה עסקת חילן');
+  assert.strictEqual(hilanTx.type, 'income');
+  assert.strictEqual(hilanTx.category, 'משכורת והכנסות');
+  assert.strictEqual(hilanTx.amount, 15000);
+
+  const groceryTx = parsed.transactions.find((t) => t.merchant.includes('שופרסל'));
+  assert(groceryTx, 'נמצאה עסקת שופרסל');
+  assert.strictEqual(groceryTx.type, 'expense');
+  assert.strictEqual(groceryTx.category, 'מזון וסופר');
+  assert.strictEqual(groceryTx.amount, 450);
+
+  // Overall parser totals
+  assert.strictEqual(parsed.totalIncome, 17872.65, 'סה"כ הכנסות כולל את שתי המשכורות');
+  assert.strictEqual(parsed.totalExpense, 450, 'סה"כ הוצאות כולל רק את שופרסל');
+});
+
+runTest('K.4 (Scenario 4): Normal expense with negative amount remains expense with proper category', () => {
+  const res = classifyTransactionSemantics({
+    merchant: 'חברת חשמל לישראל',
+    description: 'תשלום חשבון תקופתי',
+    amountIsNegative: true,
+    isCreditCardSource: false,
+  });
+
+  assert.strictEqual(res.type, 'expense');
+  assert.strictEqual(res.category, 'דיור וחשבונות');
+  assert.strictEqual(res.needsReview, false);
+});
+
+runTest('K.5 (Scenario 5): Credit card consumer refund reduces expenses, not income', () => {
+  const res = classifyTransactionSemantics({
+    merchant: 'קסטרו קניון השרון',
+    description: 'זיכוי רכישה קסטרו',
+    isCreditRow: true,
+    isCreditCardSource: true,
+  });
+
+  assert.strictEqual(res.type, 'refund');
+  assert.strictEqual(res.category, 'קניות וביגוד');
+  assert.strictEqual(res.needsReview, false);
+});
+
+runTest('K.6 (Scenario 6): Positive bank inflow with ambiguous inter-bank transfer is NOT auto-classified as income', () => {
+  const res = classifyTransactionSemantics({
+    merchant: 'בנק דיסקונט לישראל',
+    description: 'העברה נכנסת',
+    isCreditRow: false,
+    isCreditCardSource: false,
+  });
+
+  assert.notStrictEqual(res.type, 'income', 'העברה מבנק אחר אינה הכנסה אוטומטית');
+  assert.strictEqual(res.type, 'other');
+  assert.strictEqual(res.category, 'העברות ומזומן');
+  assert.strictEqual(res.needsReview, true);
+});
+
+runTest('K.7 (Scenario 7): Learned rule protection & user customization consistency', () => {
+  // 1. Verify an expense rule for a store doesn't turn a salary into an expense
+  const sampleRules: LearnedRule[] = [
+    {
+      id: 'rule-generic-exp',
+      pattern: 'קניות',
+      applyTo: 'all_similar',
+      assignedCategory: 'קניות וביגוד',
+      assignedType: 'expense',
+      createdAt: '2026-05-10',
+      userPromptBasis: 'אישור משתמש',
+      timesApplied: 1,
+    },
+  ];
+
+  const salaryRes = classifyTransactionSemantics({
+    merchant: 'מת"ש צה"ל - שכר',
+    description: 'משכורת חודשית',
+    isCreditRow: false,
+    isCreditCardSource: false,
+    customRules: sampleRules,
+  });
+
+  assert.strictEqual(salaryRes.type, 'income');
+  assert.strictEqual(salaryRes.category, 'משכורת והכנסות');
+
+  // 2. An explicit user income rule is honored
+  const customIncomeRules: LearnedRule[] = [
+    {
+      id: 'rule-freelance',
+      pattern: 'לקוח פרטי',
+      applyTo: 'all_similar',
+      assignedCategory: 'משכורת והכנסות',
+      assignedType: 'income',
+      createdAt: '2026-05-10',
+      userPromptBasis: 'אישור משתמש עבור הכנסת פרילנס',
+      timesApplied: 1,
+    },
+  ];
+
+  const freelanceRes = classifyTransactionSemantics({
+    merchant: 'לקוח פרטי ישראל',
+    description: 'תשלום פרויקט',
+    isCreditRow: false,
+    isCreditCardSource: false,
+    customRules: customIncomeRules,
+  });
+
+  assert.strictEqual(freelanceRes.type, 'income');
+  assert.strictEqual(freelanceRes.category, 'משכורת והכנסות');
+});
+
+runTest('K.8 (Scenario 8): Cash flow calculations, UI amount sign & serialization fidelity', () => {
+  const mofetTx: Transaction = {
+    id: 'tx-mofet-k8',
+    date: '2026-09-01',
+    amount: 2872.65,
+    currency: 'ILS',
+    merchant: 'מופ"ת חובה-י',
+    description: 'זיכוי שכר',
+    accountId: 'acc-poalim',
+    accountName: 'פועלים עו"ש',
+    paymentMethod: 'bank_transfer',
+    category: 'משכורת והכנסות',
+    type: 'income',
+    isRecurring: false,
+    confidenceScore: 0.95,
+    confidenceLevel: 'high',
+    needsReview: false,
+    userConfirmed: true,
+  };
+
+  const expenseTx: Transaction = {
+    id: 'tx-exp-k8',
+    date: '2026-09-02',
+    amount: 450.0,
+    currency: 'ILS',
+    merchant: 'שופרסל דיל',
+    description: 'קניות מזון',
+    accountId: 'acc-poalim',
+    accountName: 'פועלים עו"ש',
+    paymentMethod: 'credit_card',
+    category: 'מזון וסופר',
+    type: 'expense',
+    isRecurring: false,
+    confidenceScore: 0.95,
+    confidenceLevel: 'high',
+    needsReview: false,
+    userConfirmed: true,
+  };
+
+  // 1. Cash flow computation
+  const flow = calculateCashFlowForPeriod([mofetTx, expenseTx], '2026-09');
+  assert.strictEqual(flow.income, Math.round(2872.65), 'המשכורת נכללת ב-totalIncome');
+  assert.strictEqual(flow.expenses, 450.0, 'המשכורת אינה מתווספת להוצאות');
+  assert.strictEqual(flow.netCashFlow, Math.round(2872.65 - 450.0), 'תזרים נקי חיובי');
+
+  // 2. UI Display format simulation (as in TransactionsView.tsx line 279)
+  const formatTxDisplay = (t: Transaction) => {
+    const sign = t.type === 'income' ? '+' : t.type === 'refund' ? 'זיכוי +' : '-';
+    return `${sign}₪${Math.abs(t.amount).toLocaleString()}`;
+  };
+
+  assert.strictEqual(formatTxDisplay(mofetTx), '+₪2,872.65', 'מוצג עם סימן פלוס');
+  assert.strictEqual(formatTxDisplay(expenseTx), '-₪450', 'הוצאה מוצגת עם סימן מינוס');
+
+  // 3. Serialization and reload fidelity
+  const savedState = JSON.stringify([mofetTx]);
+  const restoredState: Transaction[] = JSON.parse(savedState);
+  assert.strictEqual(restoredState[0].type, 'income');
+  assert.strictEqual(restoredState[0].category, 'משכורת והכנסות');
+  assert.strictEqual(restoredState[0].amount, 2872.65);
+});
+
+runTest('K.9 (Scenario 9): PDF text layer line recognition of Mofet / Matash / Masav', () => {
+  // Simulates digital text line extracted from Israeli bank PDF
+  const pdfLine = '01/09/2026 מופ"ת חובה-י 2,872.65 זכות';
+  const hasIncomeWord =
+    pdfLine.includes('מופת') ||
+    pdfLine.includes('מופ"ת') ||
+    pdfLine.includes('מתש') ||
+    pdfLine.includes('מת"ש') ||
+    pdfLine.includes('מסב') ||
+    pdfLine.includes('מס"ב') ||
+    pdfLine.includes('משכורת') ||
+    pdfLine.includes('שכר');
+
+  assert.strictEqual(hasIncomeWord, true, 'שורת טקסט מ-PDF מזוהה כמועמדת להכנסה');
+
+  const res = classifyTransactionSemantics({
+    merchant: 'מופ"ת חובה-י',
+    description: '01/09/2026 מופ"ת חובה-י 2,872.65',
+    isCreditRow: false, // Text layer might not split columns
+    isCreditCardSource: false,
+    rawCategory: 'כללי',
+  });
+
+  assert.strictEqual(res.type, 'income');
+  assert.strictEqual(res.category, 'משכורת והכנסות');
 });
 
 console.log('\n======================================================================');

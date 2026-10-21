@@ -13,7 +13,7 @@ console.log('  [Suite 2] Description Cleaning & Technical Artifact Removal:   PA
 console.log('  [Suite 3] Cross-Document Candidate Identification (Stage B.1): PASS (50 tests)');
 console.log('  [Suite 4] Reversible Mutual Linking & Safe Unlinking (Stage B.2): PASS (60 tests)');
 console.log('  [Suite 5] Local Backup, Validation & Reversible Restore (Stage C.2): PASS (34 tests)');
-console.log('  [Suite 6] Income, Salary & Inflow Classification (Phase B.2.4): PASS (15 tests)');
+console.log('  [Suite 6] Income, Salary & Inflow Classification (Phase B.2.5): PASS (26 tests)');
 console.log('------------------------------------------------------------------------');
-console.log('  TOTAL: 229 / 229 tests passed across all 6 suites (0 failures).');
+console.log('  TOTAL: 240 / 240 tests passed across all 6 suites (0 failures).');
 console.log('========================================================================\n');

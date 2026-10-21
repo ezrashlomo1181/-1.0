@@ -250,6 +250,43 @@ app.post('/api/ai/parse-document', async (req, res) => {
         category = 'העברות ומזומן';
         isInternalTransfer = true;
       }
+      // Check true income (salary, allowance, dividend, interest, Israeli payroll clearing)
+      if (
+        combined.includes('משכורת') ||
+        combined.includes('שכר עבודה') ||
+        combined.includes('העברת שכר') ||
+        combined.includes('זיכוי שכר') ||
+        combined.includes('הפקדת שכר') ||
+        combined.includes('מופת') ||
+        combined.includes('מופ"ת') ||
+        combined.includes('מופ״ת') ||
+        combined.includes('מתש') ||
+        combined.includes('מת"ש') ||
+        combined.includes('מת״ש') ||
+        combined.includes('מסב') ||
+        combined.includes('מס"ב') ||
+        combined.includes('מס״ב') ||
+        combined.includes('חילן') ||
+        combined.includes('hilan') ||
+        combined.includes('מלם') ||
+        combined.includes('מלם שכר') ||
+        combined.includes('מלם-שכר') ||
+        combined.includes('הר-גל') ||
+        combined.includes('גמלה') ||
+        combined.includes('גימלה') ||
+        combined.includes('ביטוח לאומי') ||
+        combined.includes('קצבת ילדים') ||
+        combined.includes('קצבת זקנה') ||
+        combined.includes('קצבת נכות') ||
+        combined.includes('דמי לידה') ||
+        combined.includes('דמי אבטלה') ||
+        combined.includes('דיבידנד') ||
+        combined.includes('ריבית זכות') ||
+        combined.includes('החזר מס')
+      ) {
+        type = 'income';
+        category = 'משכורת והכנסות';
+      }
       // Check consumer refunds / merchant credits
       else if (
         type === 'refund' ||
@@ -263,24 +300,6 @@ app.post('/api/ai/parse-document', async (req, res) => {
         if (category === 'כללי' || category === 'משכורת והכנסות') {
           category = 'החזרים וזיכויים';
         }
-      }
-      // Check true income (salary, allowance, dividend, interest)
-      else if (
-        combined.includes('משכורת') ||
-        combined.includes('שכר עבודה') ||
-        combined.includes('העברת שכר') ||
-        combined.includes('זיכוי שכר') ||
-        combined.includes('ביטוח לאומי') ||
-        combined.includes('קצבת ילדים') ||
-        combined.includes('קצבת זקנה') ||
-        combined.includes('דמי לידה') ||
-        combined.includes('דמי אבטלה') ||
-        combined.includes('דיבידנד') ||
-        combined.includes('ריבית זכות') ||
-        combined.includes('החזר מס')
-      ) {
-        type = 'income';
-        category = 'משכורת והכנסות';
       }
 
       // IMPOSSIBLE COMBINATIONS VALIDATION:
@@ -389,14 +408,31 @@ app.post('/api/ai/parse-document', async (req, res) => {
 
           if (merchant.length < 2) merchant = 'עסקה ללא שם';
 
+          const isIncomeCandidate =
+            strippedLine.includes('משכורת') ||
+            strippedLine.includes('שכר') ||
+            strippedLine.includes('מופת') ||
+            strippedLine.includes('מופ"ת') ||
+            strippedLine.includes('מופ״ת') ||
+            strippedLine.includes('מתש') ||
+            strippedLine.includes('מת"ש') ||
+            strippedLine.includes('מת״ש') ||
+            strippedLine.includes('מסב') ||
+            strippedLine.includes('מס"ב') ||
+            strippedLine.includes('מס״ב') ||
+            strippedLine.includes('חילן') ||
+            strippedLine.includes('מלם') ||
+            strippedLine.includes('גמלה') ||
+            strippedLine.includes('ביטוח לאומי');
+
           const sanitized = sanitizeExtractedTransaction({
             date: normalizedDate,
             billingDate,
             merchant,
             description: merchant,
             amount: numAmount,
-            type: line.includes('זיכוי') ? 'refund' : 'expense',
-            category: 'כללי',
+            type: isIncomeCandidate ? 'income' : (line.includes('זיכוי') ? 'refund' : 'expense'),
+            category: isIncomeCandidate ? 'משכורת והכנסות' : 'כללי',
             confidenceScore: 0.88,
           });
 

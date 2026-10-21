@@ -1003,9 +1003,12 @@ function buildTransactionObject(params: {
   });
 
   // 2. Prevent impossible combinations (e.g. Income + Clothing, Income + Supermarket)
+  const isGenericRawCategory = !rawCategory || rawCategory === 'כללי' || rawCategory === 'אחר / ללא סיווג';
+  const effectiveCategory = isGenericRawCategory ? classification.category : (rawCategory || classification.category);
+
   const validated = validateAndFixTransactionCombination({
     merchant: effectiveMerchant,
-    category: rawCategory || classification.category,
+    category: effectiveCategory,
     type: classification.type,
   });
 
@@ -1013,7 +1016,7 @@ function buildTransactionObject(params: {
   let finalCategory = validated.category;
   if (finalType === 'refund' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי')) {
     finalCategory = 'החזרים וזיכויים';
-  } else if (finalType === 'income' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי')) {
+  } else if (finalType === 'income' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי' || !finalCategory)) {
     finalCategory = 'משכורת והכנסות';
   } else if (finalType === 'other' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי' || !finalCategory)) {
     finalCategory = 'אחר / לבירור';
@@ -1514,6 +1517,22 @@ export function extractTransactionsFromRawRows(
         txAmount = parsedAmount.amount;
         amountIsNegative = parsedAmount.isNegative;
         foundValidAmount = true;
+
+        const isCard =
+          institutionInfo.defaultPayment === 'credit_card' ||
+          Boolean(institutionInfo.isCreditCardOnly) ||
+          sourceFileName.toLowerCase().includes('אשראי') ||
+          sourceFileName.toLowerCase().includes('כרטיס');
+
+        if (!isCard) {
+          if (amountIsNegative) {
+            isDebitRow = true;
+            isCreditRow = false;
+          } else {
+            isCreditRow = true;
+            isDebitRow = false;
+          }
+        }
       }
     }
 
@@ -1852,6 +1871,22 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
         txAmount = parsed.amount;
         amountIsNegative = parsed.isNegative;
         foundValidAmount = true;
+
+        const isCard =
+          institutionInfo.defaultPayment === 'credit_card' ||
+          Boolean(institutionInfo.isCreditCardOnly) ||
+          fileName.toLowerCase().includes('אשראי') ||
+          fileName.toLowerCase().includes('כרטיס');
+
+        if (!isCard) {
+          if (amountIsNegative) {
+            isDebitRow = true;
+            isCreditRow = false;
+          } else {
+            isCreditRow = true;
+            isDebitRow = false;
+          }
+        }
       }
     }
 
@@ -2034,6 +2069,22 @@ export function parseHtmlContent(html: string, fileName: string): ParseResult {
           txAmount = parsed.amount;
           amountIsNegative = parsed.isNegative;
           foundValidAmount = true;
+
+          const isCard =
+            institutionInfo.defaultPayment === 'credit_card' ||
+            Boolean(institutionInfo.isCreditCardOnly) ||
+            fileName.toLowerCase().includes('אשראי') ||
+            fileName.toLowerCase().includes('כרטיס');
+
+          if (!isCard) {
+            if (amountIsNegative) {
+              isDebitRow = true;
+              isCreditRow = false;
+            } else {
+              isCreditRow = true;
+              isDebitRow = false;
+            }
+          }
         }
       }
 

@@ -434,22 +434,33 @@ export function classifyTransactionSemantics(params: {
     'תקשורת וטכנולוגיה',
   ].includes(matchedCategory);
 
-  // 4. PRIORITY 4: Handle Credit Rows / Positive Inflows
-  const isRowInCreditOrDeposit = isCreditRow || (amountIsNegative && isCreditCardSource);
+  // 4. PRIORITY 4: Handle Credit Rows / Positive Inflows & Explicit Income
+  // On bank checking accounts (!isCreditCardSource), positive amounts in single-amount columns
+  // or explicit income/salary keywords are genuine income inflows even if isCreditRow wasn't pre-set to true.
+  const isRowInCreditOrDeposit =
+    isCreditRow ||
+    (amountIsNegative && isCreditCardSource) ||
+    (!isCreditCardSource && !amountIsNegative && !isDebitRow);
+
+  // 4.1 Explicit Genuine Income (Salary, payroll clearing, pension, allowance, Mofet, Matash, Masav, Hilan, etc.)
+  // On bank checking accounts, explicit income keywords identify income regardless of whether isCreditRow is pre-set.
+  // On credit cards, only if it is a credit row or negative amount.
+  if (hasExplicitIncomeWords && (!isCreditCardSource || isRowInCreditOrDeposit)) {
+    const isGenericCategory = !matchedCategory || matchedCategory === 'כללי' || matchedCategory === 'אחר / ללא סיווג';
+    const finalIncomeCategory = isGenericCategory || isConsumerCategory ? 'משכורת והכנסות' : matchedCategory;
+
+    return {
+      category: finalIncomeCategory,
+      type: 'income',
+      confidenceScore: 0.95,
+      confidenceLevel: 'high',
+      isInternalTransfer: false,
+      isUserRule: false,
+      needsReview: false,
+    };
+  }
 
   if (isRowInCreditOrDeposit) {
-    // 4.1 Explicit Genuine Income (Salary, payroll clearing, pension, allowance)
-    if (hasExplicitIncomeWords) {
-      return {
-        category: matchedCategory && !isConsumerCategory ? matchedCategory : 'משכורת והכנסות',
-        type: 'income',
-        confidenceScore: 0.95,
-        confidenceLevel: 'high',
-        isInternalTransfer: false,
-        isUserRule: false,
-        needsReview: false,
-      };
-    }
 
     // 4.2 Explicit Refunds (e.g. "ביטול עסקה", "החזר כספי" or on credit card statements)
     if (hasExplicitRefundWords) {
