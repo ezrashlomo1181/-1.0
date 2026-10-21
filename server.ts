@@ -207,8 +207,44 @@ app.post('/api/ai/parse-document', async (req, res) => {
       let isInternalTransfer = Boolean(item.isInternalTransfer);
       let needsReview = Boolean(item.needsReview);
       let reviewReason = item.reviewReason || '';
+      const amountIsNegative = typeof item.amountIsNegative === 'boolean'
+        ? item.amountIsNegative
+        : String(item.amount ?? '').trim().startsWith('-');
+      const explicitDirection = item.flowDirection === 'inflow' || item.flowDirection === 'outflow' || item.flowDirection === 'unknown'
+        ? item.flowDirection
+        : undefined;
 
       const combined = `${merchant} ${desc}`.toLowerCase();
+      const incomeEvidence = [
+        'משכורת', 'שכר עבודה', 'הפקדת שכר', 'מופת', 'מופ"ת', 'מופ״ת',
+        'מתש', 'מת"ש', 'מת״ש', 'חילן', 'מלם', 'גמלה', 'גימלה',
+        'ביטוח לאומי', 'קצבת ילדים', 'קצבת זקנה', 'קצבת נכות',
+        'דמי לידה', 'דמי אבטלה', 'דיבידנד', 'ריבית זכות', 'החזר מס'
+      ].some((word) => combined.includes(word.toLowerCase()));
+      const refundEvidence = ['זיכוי', 'החזר כספי', 'ביטול עסקה', 'refund', 'reversal']
+        .some((word) => combined.includes(word));
+      const transferEvidence = [
+        'העברה עצמית', 'העברה בין חשבונות', 'העברה לחיסכון',
+        'העברה מחשבון', 'העברה לחשבון', 'הפקדה לפיקדון'
+      ].some((word) => combined.includes(word));
+      const isCreditCardSource = /ישראכרט|כאל|\bcal\b|\bmax\b|\bvisa\b|mastercard|אשראי|כרטיס/i.test(`${detectedInstitution} ${fileName}`);
+      const inferredDirection: 'inflow' | 'outflow' | 'unknown' = explicitDirection || (
+        typeof item.isCredit === 'boolean' && typeof item.isDebit === 'boolean'
+          ? (item.isCredit === item.isDebit ? 'unknown' : item.isCredit ? 'inflow' : 'outflow')
+          : typeof item.isCredit === 'boolean'
+            ? (item.isCredit ? 'inflow' : 'outflow')
+            : typeof item.isDebit === 'boolean'
+              ? (item.isDebit ? 'outflow' : 'inflow')
+              : amountIsNegative
+                ? (isCreditCardSource ? 'inflow' : 'outflow')
+                : incomeEvidence || refundEvidence
+                  ? 'inflow'
+                  : transferEvidence
+                    ? 'unknown'
+                    : isCreditCardSource
+                      ? 'outflow'
+                      : 'unknown'
+      );
 
       // Check ATM (Always expense, never transfer!)
       if (
@@ -329,9 +365,13 @@ app.post('/api/ai/parse-document', async (req, res) => {
         billingDate: item.billingDate || undefined,
         merchant,
         description: desc,
-        amount: Math.abs(Number(item.amount) || 0),
+        amount: Math.abs(Number(String(item.amount ?? '').replace(/,/g, '')) || 0),
         type,
         category,
+        flowDirection: inferredDirection,
+        isCredit: typeof item.isCredit === 'boolean' ? item.isCredit : undefined,
+        isDebit: typeof item.isDebit === 'boolean' ? item.isDebit : undefined,
+        amountIsNegative,
         currency: item.currency || 'ILS',
         isRecurring: Boolean(item.isRecurring),
         isInternalTransfer,
@@ -346,7 +386,7 @@ app.post('/api/ai/parse-document', async (req, res) => {
       const lines = text.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
       const results: any[] = [];
       const dateRegex = /\b(0?[1-9]|[12]\d|3[01])[-/.](0?[1-9]|1[0-2])[-/.](\d{2,4})\b/g;
-      const amountRegex = /\b-?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})\b|\b-?\d+\.\d{2}\b/g;
+      const amountRegex = /(?<!\w)-?\d{1,3}(?:,\d{3})*(?:\.\d{1,2})\b|(?<!\w)-?\d+\.\d{2}\b/g;
 
       for (const line of lines) {
         // Skip header / summary lines
@@ -379,13 +419,16 @@ app.post('/api/ai/parse-document', async (req, res) => {
           const normalizedDate = parseDateMatch(dateMatches[0]);
           const billingDate = dateMatches.length > 1 ? parseDateMatch(dateMatches[1]) : undefined;
 
-          // Amount selection: pick the first valid financial amount that isn't 0
+          // Preserve the original sign separately; the UI amount stays non-negative,
+          // while flowDirection carries the actual movement of money.
           let numAmount = 0;
+          let amountIsNegative = false;
           for (const mMatch of amountMatches) {
             const rawAmountStr = mMatch[0].replace(/,/g, '');
-            const parsed = Math.abs(parseFloat(rawAmountStr));
-            if (!isNaN(parsed) && parsed > 0) {
-              numAmount = parsed;
+            const parsed = parseFloat(rawAmountStr);
+            if (!isNaN(parsed) && Math.abs(parsed) > 0) {
+              numAmount = Math.abs(parsed);
+              amountIsNegative = parsed < 0;
               break;
             }
           }
@@ -431,8 +474,22 @@ app.post('/api/ai/parse-document', async (req, res) => {
             merchant,
             description: merchant,
             amount: numAmount,
-            type: isIncomeCandidate ? 'income' : (line.includes('זיכוי') ? 'refund' : 'expense'),
+            amountIsNegative,
+            flowDirection: amountIsNegative
+              ? (/ישראכרט|כאל|\\bcal\\b|\\bmax\\b|ויזה|אשראי|כרטיס/i.test(`${detectedInstitution} ${fileName}`) ? 'inflow' : 'outflow')
+              : isIncomeCandidate || line.includes('זיכוי') || line.includes('החזר כספי')
+                ? 'inflow'
+                : (/ישראכרט|כאל|\\bcal\\b|\\bmax\\b|ויזה|אשראי|כרטיס/i.test(`${detectedInstitution} ${fileName}`)
+                  ? 'outflow'
+                  : 'unknown'),
+            isCredit: amountIsNegative ? false : (isIncomeCandidate || line.includes('זיכוי') || line.includes('החזר כספי') ? true : undefined),
+            isDebit: amountIsNegative ? true : undefined,
+            type: isIncomeCandidate ? 'income' : (line.includes('זיכוי') || line.includes('החזר כספי') ? 'refund' : 'expense'),
             category: isIncomeCandidate ? 'משכורת והכנסות' : 'כללי',
+            needsReview: !amountIsNegative && !isIncomeCandidate && !line.includes('זיכוי') && !line.includes('החזר כספי'),
+            reviewReason: !amountIsNegative && !isIncomeCandidate && !line.includes('זיכוי') && !line.includes('החזר כספי')
+              ? 'לא נמצא סימן סכום או טור חובה/זכות חד-משמעי בחילוץ PDF. נדרש אימות כיוון התנועה.'
+              : undefined,
             confidenceScore: 0.88,
           });
 
@@ -469,7 +526,7 @@ app.post('/api/ai/parse-document', async (req, res) => {
 1. אסור לחלוטין להמציא עסקאות דמה, עסקאות לדוגמה או נתונים שלא קיימים במסמך.
 2. אם אין עסקאות במסמך, החזר מערך ריק: "extractedTransactions": [].
 3. חלץ תאריך עסקה מדויק בפורמט YYYY-MM-DD. נרמל תאריכים ישראליים כגון 15/04/2024 או 15/04/24. אם מופיע גם תאריך חיוב/ערך בנפרד, חלץ אותו בשדה "billingDate" (YYYY-MM-DD).
-4. סכום חייב להיות מספר חיובי (למשל 120.50).
+4. סכום חייב להיות מספר חיובי (למשל 120.50), ובנוסף חובה לשמר כיוון תנועה בנפרד: flowDirection הוא inflow / outflow / unknown. אם במסמך קיימים טורי חובה/זכות מפורשים, החזר isDebit ו-isCredit כערכי boolean. אם מופיע סימן מינוס, החזר amountIsNegative: true. אל תסיק כיוון רק משדה type; כאשר אין ראיה ברורה, החזר flowDirection: "unknown" ו-needsReview: true.
 5. סיווג מדויק ושמרני של סוגי העסקאות (type):
    - משיכת מזומן / כספומט / בנקומט מסווגת כ-expense (הוצאה / משיכת מזומן), ולא כ-transfer!
    - פירעון כרטיס אשראי / חיוב חודשי כרטיס אשראי בחשבון העו"ש יסווג כ-transfer עם isInternalTransfer: true, כדי למנוע ספירה כפולה אם נטענו עסקאות הכרטיס.
@@ -491,7 +548,9 @@ app.post('/api/ai/parse-document', async (req, res) => {
       "merchant": "שם בית עסק / תיאור הפעולה",
       "description": "פירוט נוסף אם יש",
       "amount": 123.45,
-      "type": "expense",
+      "amountIsNegative": false,
+      "flowDirection": "unknown",
+      "type": "other",
       "category": "שם קטגוריה",
       "currency": "ILS",
       "isRecurring": false,

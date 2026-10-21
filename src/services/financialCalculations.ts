@@ -157,8 +157,14 @@ export function calculateCashFlowForPeriod(
   transactions: Transaction[],
   targetMonthKey?: string
 ): DetailedCashFlowPeriod {
-  // Filter out internal transfers and consolidated card settlements
-  const validTransactions = transactions.filter((t) => !t.isInternalTransfer && t.type !== 'transfer');
+  // Exclude explicitly ignored transactions, internal transfers and directionally ambiguous rows.
+  // Legacy transactions without flowDirection keep their previous type-based behavior.
+  const validTransactions = transactions.filter((t) =>
+    !t.ignored &&
+    !t.isInternalTransfer &&
+    t.type !== 'transfer' &&
+    t.flowDirection !== 'unknown'
+  );
 
   // Determine which month to calculate
   let monthKey = targetMonthKey;
@@ -191,24 +197,60 @@ export function calculateCashFlowForPeriod(
   for (const tx of periodTxs) {
     const cat = tx.category || 'אחר / ללא סיווג';
 
-    if (tx.type === 'income') {
-      income += tx.amount;
-      const src = tx.merchant || 'הכנסה';
-      incomeSourcesMap.set(src, (incomeSourcesMap.get(src) || 0) + tx.amount);
-    } else if (tx.type === 'refund') {
-      refunds += Math.abs(tx.amount);
-      const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
-      curr.refunds += Math.abs(tx.amount);
-      curr.items.push(tx);
-      categoryMap.set(cat, curr);
-    } else if (tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment') {
-      grossExpenses += Math.abs(tx.amount);
-      const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
-      curr.gross += Math.abs(tx.amount);
-      curr.items.push(tx);
-      categoryMap.set(cat, curr);
-    } else if (tx.type === 'transfer') {
-      transfers += tx.amount;
+    // The verified direction is authoritative. A transaction with unknown direction
+    // was filtered above, rather than silently counted as either income or expense.
+    const direction = tx.flowDirection;
+    const amount = Math.abs(tx.amount);
+
+    if (direction === 'inflow') {
+      if (tx.type === 'refund') {
+        refunds += amount;
+        const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
+        curr.refunds += amount;
+        curr.items.push(tx);
+        categoryMap.set(cat, curr);
+      } else if (tx.type === 'income') {
+        income += amount;
+        const src = tx.merchant || 'הכנסה';
+        incomeSourcesMap.set(src, (incomeSourcesMap.get(src) || 0) + amount);
+      } else if (tx.type === 'transfer' || tx.type === 'investment_withdrawal') {
+        transfers += amount;
+      }
+      // Any other inflow is deliberately held out of totals until classified.
+    } else if (direction === 'outflow') {
+      if (tx.type === 'transfer' || tx.type === 'investment_withdrawal' || tx.type === 'investment_contribution') {
+        transfers += amount;
+      } else {
+        // Direction is the accounting source of truth: an outflow cannot be income or a refund.
+        // Count it as spending even if its semantic type is contradictory, so cash leaving the
+        // account is not silently lost from reports. The parser flags such contradictions for review.
+        grossExpenses += amount;
+        const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
+        curr.gross += amount;
+        curr.items.push(tx);
+        categoryMap.set(cat, curr);
+      }
+    } else if (!direction) {
+      // Compatibility for historical transactions created before flowDirection existed.
+      if (tx.type === 'income') {
+        income += amount;
+        const src = tx.merchant || 'הכנסה';
+        incomeSourcesMap.set(src, (incomeSourcesMap.get(src) || 0) + amount);
+      } else if (tx.type === 'refund') {
+        refunds += amount;
+        const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
+        curr.refunds += amount;
+        curr.items.push(tx);
+        categoryMap.set(cat, curr);
+      } else if (tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment' || tx.type === 'debt') {
+        grossExpenses += amount;
+        const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
+        curr.gross += amount;
+        curr.items.push(tx);
+        categoryMap.set(cat, curr);
+      } else if (tx.type === 'transfer' || tx.type === 'investment_withdrawal') {
+        transfers += amount;
+      }
     }
   }
 
