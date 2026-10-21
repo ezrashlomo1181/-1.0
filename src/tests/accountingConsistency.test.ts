@@ -54,10 +54,10 @@ runTest('Verified inflows and outflows drive totals, not a contradictory semanti
 
   const result = calculateCashFlowForPeriod(transactions, '2026-09');
   assert.equal(result.income, 5000);
-  assert.equal(result.grossExpenses, 1000);
+  assert.equal(result.grossExpenses, 1800);
   assert.equal(result.refunds, 100);
-  assert.equal(result.expenses, 900);
-  assert.equal(result.netCashFlow, 4100);
+  assert.equal(result.expenses, 1700);
+  assert.equal(result.netCashFlow, 3300);
   assert.equal(result.transactions.some((t) => t.id === 'uncertain'), false);
 });
 
@@ -107,13 +107,14 @@ runTest('Unknown source direction is quarantined and requires review', () => {
   assert.equal(built.userConfirmed, false);
 });
 
-runTest('Contradictory inflow and expense semantics are not silently counted as spending', () => {
+runTest('Inflow marked expense is not counted as spending; outflow marked income is spending', () => {
   const result = calculateCashFlowForPeriod([
-    tx({ id: 'contradiction', amount: 250, type: 'expense', flowDirection: 'inflow', needsReview: true }),
+    tx({ id: 'inflow-marked-expense', amount: 250, type: 'expense', flowDirection: 'inflow', needsReview: true }),
+    tx({ id: 'outflow-marked-income', amount: 400, type: 'income', flowDirection: 'outflow', needsReview: true }),
   ], '2026-09');
   assert.equal(result.income, 0);
-  assert.equal(result.expenses, 0);
-  assert.equal(result.grossExpenses, 0);
+  assert.equal(result.expenses, 400);
+  assert.equal(result.grossExpenses, 400);
 });
 
 console.log(`Stage 2 accounting consistency: ${passed} passed, ${failed} failed.`);
