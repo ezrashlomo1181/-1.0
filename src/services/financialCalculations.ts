@@ -218,7 +218,7 @@ export function calculateCashFlowForPeriod(
       }
       // Any other inflow is deliberately held out of totals until classified.
     } else if (direction === 'outflow') {
-      if (tx.type === 'transfer' || tx.type === 'investment_withdrawal') {
+      if (tx.type === 'transfer' || tx.type === 'investment_withdrawal' || tx.type === 'investment_contribution') {
         transfers += amount;
       } else {
         // Direction is the accounting source of truth: an outflow cannot be income or a refund.
@@ -242,7 +242,7 @@ export function calculateCashFlowForPeriod(
         curr.refunds += amount;
         curr.items.push(tx);
         categoryMap.set(cat, curr);
-      } else if (tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment' || tx.type === 'debt' || tx.type === 'investment_contribution') {
+      } else if (tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment' || tx.type === 'debt') {
         grossExpenses += amount;
         const curr = categoryMap.get(cat) || { gross: 0, refunds: 0, items: [] };
         curr.gross += amount;
