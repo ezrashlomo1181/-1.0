@@ -162,6 +162,16 @@ export interface Account {
   importedMonthsCount: number;
 }
 
+export interface CategoryDefinition {
+  id: string;
+  name: string;
+  isCustom: boolean;
+  color: string;
+  iconName?: string;
+  userId?: string;
+  description?: string;
+}
+
 export interface BudgetCategory {
   id: string;
   category: string;

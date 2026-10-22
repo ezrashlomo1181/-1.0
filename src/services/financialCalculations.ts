@@ -89,12 +89,13 @@ export function calculateNetWorth(accounts: Account[]): NetWorthSummary {
   };
 }
 
-const CURRENT_APP_DATE = '2026-10-08';
-export const CURRENT_APP_MONTH = '2026-10';
+import {
+  getCurrentAppDate,
+  getCurrentAppMonthKey,
+} from './clockService';
 
-export function getCurrentAppMonthKey(): string {
-  return CURRENT_APP_MONTH;
-}
+export { getCurrentAppDate, getCurrentAppMonthKey };
+export const CURRENT_APP_MONTH = getCurrentAppMonthKey();
 
 export interface DetailedCashFlowPeriod {
   monthKey: string;
@@ -227,15 +228,16 @@ export function calculateCashFlowForPeriod(
   // 3. If no historical data exists, fallback gracefully to CURRENT_APP_MONTH.
   let monthKey = targetMonthKey;
   if (!monthKey) {
+    const currentAppMonth = getCurrentAppMonthKey();
     const availableMonths = Array.from(
       new Set(
         validTransactions
           .map((t) => t.date?.substring(0, 7))
-          .filter((k) => k && k <= CURRENT_APP_MONTH)
+          .filter((k) => k && k <= currentAppMonth)
       )
     ).sort((a, b) => b.localeCompare(a));
 
-    monthKey = availableMonths[0] || CURRENT_APP_MONTH;
+    monthKey = availableMonths[0] || currentAppMonth;
   }
 
   // Pre-index all transactions to look up linked expenses for refunds across dataset
@@ -368,9 +370,9 @@ export function calculateCashFlowForPeriod(
     categoryBreakdown,
     incomeBreakdown,
     transactions: periodTxs,
-    isCurrentMonth: monthKey === CURRENT_APP_MONTH,
-    isFuture: monthKey! > CURRENT_APP_MONTH,
-    isHistorical: monthKey! < CURRENT_APP_MONTH,
+    isCurrentMonth: monthKey === getCurrentAppMonthKey(),
+    isFuture: monthKey! > getCurrentAppMonthKey(),
+    isHistorical: monthKey! < getCurrentAppMonthKey(),
     anomaliesCount,
     operatingSavings: Math.round(operatingSavings),
     quarantinedTransactions,
@@ -407,7 +409,7 @@ export function calculateMonthlyCashFlow(
  */
 export function calculatePersonalHistoricalAverages(
   transactions: Transaction[],
-  currentMonthKey: string = CURRENT_APP_MONTH
+  currentMonthKey: string = getCurrentAppMonthKey()
 ): PersonalHistoricalAverages {
   const valid = transactions.filter((t) => !t.isInternalTransfer && t.type !== 'transfer');
 
@@ -501,7 +503,7 @@ export function getCashFlowHistory(
     new Set(
       valid
         .map((t) => t.date?.substring(0, 7))
-        .filter((k) => k && k <= CURRENT_APP_MONTH)
+        .filter((k) => k && k <= getCurrentAppMonthKey())
     )
   ).sort((a, b) => a.localeCompare(b));
 

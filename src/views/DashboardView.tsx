@@ -14,7 +14,7 @@ import {
   getCashFlowHistory,
   calculateCashFlowForPeriod,
   calculatePersonalHistoricalAverages,
-  CURRENT_APP_MONTH,
+  getCurrentAppMonthKey,
   CategorySummary,
   MonthDataPoint,
   isTransactionQuarantined,
@@ -207,7 +207,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
     (t) => !t.isInternalTransfer && t.type !== 'transfer' && t.date
   );
   const distinctMonths = Array.from(
-    new Set(validNonTransfer.map((t) => t.date.substring(0, 7)).filter((k) => k <= CURRENT_APP_MONTH))
+    new Set(validNonTransfer.map((t) => t.date.substring(0, 7)).filter((k) => k <= getCurrentAppMonthKey()))
   ).sort((a, b) => b.localeCompare(a));
 
   const currentPeriodKey = latestPeriod.monthKey;

@@ -19,6 +19,8 @@ const SUITES: SuiteSpec[] = [
   { file: './incomeClassification.test.js', name: 'Income, Salary & Inflow Classification (Phase B.2.5)' },
   { file: './flowDirection.test.js', name: 'Flow Direction & Safe UI Presentation (Stage 1)' },
   { file: './cashFlowStage1.test.js', name: 'Base Calculations & Independent Cash Flow (Stage 1)' },
+  { file: './clockService.test.js', name: 'Israel Local Clock & Date Boundaries (Stage 2a)' },
+  { file: './categoriesService.test.js', name: 'Central Categories Service & Fixed/Custom Categories (Stage 1)' },
 ];
 
 interface SuiteResult {
