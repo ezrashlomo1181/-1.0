@@ -14,6 +14,18 @@ interface VerificationModalProps {
   ) => void;
 }
 
+export function formatPaymentMethodLabel(method?: string): string {
+  switch (method) {
+    case 'credit_card': return 'כרטיס אשראי';
+    case 'bank_transfer': return 'העברה בנקאית';
+    case 'direct_debit': return 'הוראת קבע';
+    case 'bit': return 'ביט';
+    case 'paybox': return 'פייבוקס';
+    case 'cash': return 'מזומן';
+    default: return method || 'לא צוין';
+  }
+}
+
 export const VerificationModal: React.FC<VerificationModalProps> = ({
   transaction,
   onClose,
@@ -131,9 +143,21 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
                 <span>{transaction.accountName}</span>
               </div>
               <div>
-                <span className="text-slate-500">תאריך: </span>
+                <span className="text-slate-500">תאריך עסקה: </span>
                 <span className="font-mono">{transaction.date}</span>
               </div>
+              {transaction.billingDate && (
+                <div>
+                  <span className="text-slate-500">תאריך חיוב בחשבון: </span>
+                  <span className="font-mono">{transaction.billingDate}</span>
+                </div>
+              )}
+              {transaction.paymentMethod && (
+                <div>
+                  <span className="text-slate-500">אמצעי תשלום: </span>
+                  <span>{formatPaymentMethodLabel(transaction.paymentMethod)}</span>
+                </div>
+              )}
               {transaction.sourceDocument && (
                 <div className="col-span-2 text-slate-500 dark:text-slate-400">
                   <span className="text-slate-500">קובץ מקור: </span>

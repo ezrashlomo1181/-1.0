@@ -21,6 +21,7 @@ const SUITES: SuiteSpec[] = [
   { file: './cashFlowStage1.test.js', name: 'Base Calculations & Independent Cash Flow (Stage 1)' },
   { file: './clockService.test.js', name: 'Israel Local Clock & Date Boundaries (Stage 2a)' },
   { file: './categoriesService.test.js', name: 'Central Categories Service & Fixed/Custom Categories (Stage 1)' },
+  { file: './transactionsViewPresentation.test.js', name: 'Transactions View Presentation & Deduplication' },
 ];
 
 interface SuiteResult {

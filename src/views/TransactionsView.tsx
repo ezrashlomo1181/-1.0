@@ -88,6 +88,61 @@ export function getDisplayDirection(tx: Transaction): DisplayDirection {
   return 'unknown';
 }
 
+/**
+ * Helper to ensure the merchant name is prominent and description is only shown
+ * if it exists and is distinct from the merchant name (preventing duplicates).
+ */
+export function formatMerchantAndDescription(tx: Transaction): {
+  merchant: string;
+  secondaryDescription: string | null;
+} {
+  const merchant = (tx.merchant || 'עסקה ללא שם').trim();
+  const rawDesc = (tx.description || '').trim();
+  const secondaryDescription = rawDesc && rawDesc !== merchant ? rawDesc : null;
+  return { merchant, secondaryDescription };
+}
+
+/**
+ * Pure presentation helper for the two separate amount columns: 'יצא' (outflow) and 'נכנס' (inflow).
+ * Enforces the strict rule: amount appears in exactly one column, never both.
+ * Unknown flow direction does NOT guess or assign +/- signs.
+ */
+export function formatAmountColumns(tx: Transaction): {
+  outflowText: string | null;
+  inflowText: string | null;
+  isUnknown: boolean;
+  direction: DisplayDirection;
+} {
+  const dir = getDisplayDirection(tx);
+  const formattedAbs = `₪${Math.abs(tx.amount).toLocaleString()}`;
+
+  if (dir === 'outflow') {
+    return {
+      outflowText: `−${formattedAbs}`,
+      inflowText: null,
+      isUnknown: false,
+      direction: 'outflow',
+    };
+  }
+
+  if (dir === 'inflow') {
+    return {
+      outflowText: null,
+      inflowText: `+${formattedAbs}`,
+      isUnknown: false,
+      direction: 'inflow',
+    };
+  }
+
+  // Unknown direction: do NOT guess into either column, mark as unknown
+  return {
+    outflowText: `${formattedAbs} (לבדיקה)`,
+    inflowText: null,
+    isUnknown: true,
+    direction: 'unknown',
+  };
+}
+
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
   transactions,
   searchQuery,
@@ -242,31 +297,38 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       )}
                     </div>
                   </th>
-                  <th className="py-2.5 px-4 font-medium">בית עסק ותיאור</th>
+                  <th className="py-2.5 px-4 font-medium">בית עסק</th>
                   <th className="py-2.5 px-4 font-medium">חשבון מקור</th>
                   <th className="py-2.5 px-4 font-medium">קטגוריה</th>
-                  <th className="py-2.5 px-4 font-medium">סוג עסקה ורמת ביטחון</th>
-                  <th className="py-2.5 px-4 font-medium text-left">סכום בש״ח</th>
-                  <th className="py-2.5 px-4 font-medium text-center">פעולות</th>
+                  <th className="py-2.5 px-4 font-medium text-left text-rose-700 dark:text-rose-400">יצא</th>
+                  <th className="py-2.5 px-4 font-medium text-left text-emerald-700 dark:text-emerald-400">נכנס</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100 dark:divide-[#1F2937]/80">
                 {filtered.map((tx) => {
+                  const { merchant, secondaryDescription } = formatMerchantAndDescription(tx);
+                  const amountCols = formatAmountColumns(tx);
+
                   return (
                     <tr
                       key={tx.id}
-                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors ${
+                      onClick={() => onOpenReviewModal(tx)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault();
+                          onOpenReviewModal(tx);
+                        }
+                      }}
+                      tabIndex={0}
+                      role="button"
+                      aria-label={`עסקה מאת ${merchant}, תאריך ${tx.date}`}
+                      className={`hover:bg-slate-50 dark:hover:bg-slate-800/40 transition-colors cursor-pointer select-none focus:outline-none focus:bg-slate-100 dark:focus:bg-slate-800/60 ${
                         tx.needsReview ? 'bg-amber-50/40 dark:bg-amber-950/20' : ''
                       }`}
                     >
-                      {/* Date */}
+                      {/* Date: Transaction date only in the main table */}
                       <td className="py-3 px-4 font-mono text-slate-700 dark:text-slate-300 whitespace-nowrap">
                         <div className="font-semibold text-xs">{tx.date}</div>
-                        {tx.billingDate && tx.billingDate !== tx.date && (
-                          <div className="text-[10px] text-slate-400 dark:text-slate-500 font-mono" title="תאריך חיוב">
-                            חיוב: {tx.billingDate}
-                          </div>
-                        )}
                         {tx.additionalSources && tx.additionalSources.length > 0 && (
                           <div
                             className="inline-flex items-center gap-1 text-[9px] text-blue-600 dark:text-blue-400 font-sans mt-0.5"
@@ -278,107 +340,89 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                         )}
                       </td>
 
-                      {/* Merchant & Description */}
+                      {/* Merchant: prominent name, distinct secondary description only if non-duplicate */}
                       <td className="py-3 px-4 max-w-xs">
                         <div className="font-semibold text-[#0F172A] dark:text-white text-xs flex items-center gap-1.5">
-                          <span>{tx.merchant}</span>
+                          <span>{merchant}</span>
                           {tx.isRecurring && (
                             <span className="text-[10px] text-slate-700 dark:text-slate-300 font-normal bg-slate-100 dark:bg-slate-800 px-1.5 py-0.2 rounded border border-slate-200 dark:border-slate-700">
                               קבוע
                             </span>
                           )}
                         </div>
-                        <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
-                          {tx.description}
-                        </div>
+                        {secondaryDescription && (
+                          <div className="text-[11px] text-slate-500 dark:text-slate-400 truncate mt-0.5">
+                            {secondaryDescription}
+                          </div>
+                        )}
                       </td>
 
-                      {/* Account */}
+                      {/* Account with optional internal transfer indicator */}
                       <td className="py-3 px-4 text-slate-600 dark:text-slate-300 whitespace-nowrap">
-                        <span className="text-xs">{tx.accountName}</span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="text-xs">{tx.accountName}</span>
+                          {tx.isInternalTransfer && (
+                            <span
+                              className="inline-flex items-center gap-1 text-[10px] font-medium text-slate-600 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-[#1F2937] px-1.5 py-0.5 rounded"
+                              title="העברה פנימית מנוטרלת"
+                            >
+                              <RefreshCw className="w-2.5 h-2.5 text-slate-500" />
+                              <span>העברה פנימית</span>
+                            </span>
+                          )}
+                        </div>
                       </td>
 
                       {/* Category */}
                       <td className="py-3 px-4 whitespace-nowrap">
-                        <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-[#1F2937] text-[11px] font-medium">
-                          {tx.category}
-                        </span>
+                        <div className="flex items-center gap-1.5">
+                          <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-[#1F2937] text-[11px] font-medium">
+                            {tx.category}
+                          </span>
+                          {tx.needsReview && (
+                            <span
+                              className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60"
+                              title="עסקה הדורשת בדיקה ואימות"
+                            >
+                              <ShieldAlert className="w-2.5 h-2.5 text-amber-600 dark:text-amber-400" />
+                              <span>לבדיקה</span>
+                            </span>
+                          )}
+                        </div>
                       </td>
 
-                      {/* Status / Confidence */}
-                      <td className="py-3 px-4 whitespace-nowrap">
-                        {tx.isInternalTransfer ? (
+                      {/* Outflow (יצא): negative amount in red, '-' when empty */}
+                      <td className="py-3 px-4 text-left font-mono whitespace-nowrap text-xs">
+                        {amountCols.isUnknown ? (
                           <span
-                            className="inline-flex items-center gap-1 text-[11px] font-medium text-slate-700 dark:text-slate-300 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-[#1F2937] px-2 py-0.5 rounded-md"
-                            title="העברה פנימית שנוטרלה למניעת ספירה כפולה"
+                            className="text-slate-700 dark:text-slate-300 font-medium inline-flex items-center gap-1"
+                            title="כיוון תנועה אינו ודאי (מצב ניטרלי לבדיקה)"
                           >
-                            <RefreshCw className="w-3 h-3 text-slate-500 dark:text-slate-400" />
-                            <span>העברה פנימית</span>
+                            <span>₪{Math.abs(tx.amount).toLocaleString()}</span>
+                            <span className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1 py-0.2 font-sans">
+                              לא נקבע
+                            </span>
                           </span>
-                        ) : tx.needsReview ? (
-                          <button
-                            onClick={() => onOpenReviewModal(tx)}
-                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-900 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 hover:bg-amber-100 dark:hover:bg-amber-900/50 transition-colors cursor-pointer"
-                          >
-                            <ShieldAlert className="w-3 h-3 text-amber-700 dark:text-amber-400" />
-                            <span>דורש אימות</span>
-                          </button>
+                        ) : amountCols.outflowText ? (
+                          <span className="text-rose-700 dark:text-rose-400 font-bold">
+                            {amountCols.outflowText}
+                          </span>
                         ) : (
-                          <span className="inline-flex items-center gap-1 text-[11px] text-emerald-700 dark:text-emerald-400">
-                            <CheckCircle className="w-3 h-3 text-emerald-700 dark:text-emerald-500" />
-                            <span>מאומת ({Math.round(tx.confidenceScore * 100)}%)</span>
-                          </span>
+                          <span className="text-slate-300 dark:text-slate-600 font-normal">—</span>
                         )}
                       </td>
 
-                      {/* Amount */}
+                      {/* Inflow (נכנס): positive amount in green, '-' when empty */}
                       <td className="py-3 px-4 text-left font-mono whitespace-nowrap text-xs">
-                        {(() => {
-                          const dir = getDisplayDirection(tx);
-                          if (tx.isInternalTransfer) {
-                            return (
-                              <span className="text-slate-400 dark:text-slate-500 line-through">
-                                ₪{Math.abs(tx.amount).toLocaleString()}
-                              </span>
-                            );
-                          }
-                          if (dir === 'inflow') {
-                            return (
-                              <span className="text-emerald-700 dark:text-emerald-400 font-bold">
-                                {tx.type === 'refund' ? 'זיכוי +' : '+'}₪{Math.abs(tx.amount).toLocaleString()}
-                              </span>
-                            );
-                          }
-                          if (dir === 'outflow') {
-                            return (
-                              <span className="text-rose-700 dark:text-rose-400 font-bold">
-                                -₪{Math.abs(tx.amount).toLocaleString()}
-                              </span>
-                            );
-                          }
-                          // Neutral state for 'unknown' flow direction: no +/- signs, neutral color & badge
-                          return (
-                            <span
-                              className="text-slate-700 dark:text-slate-300 font-medium inline-flex items-center gap-1.5"
-                              title="כיוון תנועה אינו ודאי (מצב ניטרלי)"
-                            >
-                              <span>₪{Math.abs(tx.amount).toLocaleString()}</span>
-                              <span className="text-[10px] text-slate-500 dark:text-slate-400 bg-slate-100 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded px-1 py-0.2 font-sans">
-                                לא נקבע
-                              </span>
-                            </span>
-                          );
-                        })()}
-                      </td>
-
-                      {/* Actions */}
-                      <td className="py-3 px-4 text-center whitespace-nowrap">
-                        <button
-                          onClick={() => onOpenReviewModal(tx)}
-                          className="px-2 py-1 rounded text-[11px] text-slate-600 dark:text-slate-300 hover:text-slate-900 dark:hover:text-white bg-slate-100 dark:bg-slate-800 hover:bg-slate-200 dark:hover:bg-slate-700 border border-slate-200 dark:border-[#1F2937] transition-colors cursor-pointer"
-                        >
-                          ערוך / אמת
-                        </button>
+                        {amountCols.isUnknown ? (
+                          <span className="text-slate-300 dark:text-slate-600 font-normal">—</span>
+                        ) : amountCols.inflowText ? (
+                          <span className="text-emerald-700 dark:text-emerald-400 font-bold">
+                            {amountCols.inflowText}
+                          </span>
+                        ) : (
+                          <span className="text-slate-300 dark:text-slate-600 font-normal">—</span>
+                        )}
                       </td>
                     </tr>
                   );
@@ -391,3 +435,4 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
     </div>
   );
 };
+
