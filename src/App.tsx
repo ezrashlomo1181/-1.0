@@ -209,6 +209,16 @@ export default function App() {
         saveStoredLearnedRules(newRules);
       }
 
+      // Synchronize flowDirection consistently with user-confirmed effectiveType
+      let resolvedFlowDirection: 'inflow' | 'outflow' | 'unknown' | undefined = targetTx?.flowDirection;
+      if (effectiveType === 'income' || effectiveType === 'loan_received' || effectiveType === 'refund') {
+        resolvedFlowDirection = 'inflow';
+      } else if (effectiveType === 'expense' || effectiveType === 'fee' || effectiveType === 'loan_payment') {
+        resolvedFlowDirection = 'outflow';
+      } else if (effectiveType === 'transfer') {
+        resolvedFlowDirection = targetTx?.flowDirection;
+      }
+
       // Update the resolved transaction + optionally other similar transactions if rule is all_similar
       const patLower = pattern.trim().toLowerCase();
       const updatedTxs = prev.transactions.map((t) => {
@@ -217,6 +227,7 @@ export default function App() {
             ...t,
             category: chosenCategory,
             type: effectiveType,
+            flowDirection: resolvedFlowDirection,
             isInternalTransfer: isTransfer,
             needsReview: false,
             reviewReason: undefined,
@@ -236,6 +247,7 @@ export default function App() {
             ...t,
             category: chosenCategory,
             type: effectiveType,
+            flowDirection: resolvedFlowDirection,
             isInternalTransfer: isTransfer,
             needsReview: false,
             reviewReason: undefined,

@@ -112,8 +112,67 @@ export interface DetailedCashFlowPeriod {
   transactions: Transaction[];
   isCurrentMonth: boolean;
   isFuture: boolean;
+  isHistorical: boolean;
   anomaliesCount?: number;
   operatingSavings?: number;
+  quarantinedTransactions: Transaction[];
+  quarantinedAmounts: Record<string, number>;
+}
+
+/**
+ * Evaluates whether a transaction must be isolated in quarantine:
+ * 1. Clear contradiction between transaction type and flowDirection:
+ *    - type === 'income' but flowDirection === 'outflow'
+ *    - (type === 'expense' | 'fee' | 'loan_payment') but flowDirection === 'inflow'
+ *    - type === 'refund' but flowDirection === 'outflow'
+ *    - type === 'loan_received' but flowDirection === 'outflow'
+ * 2. Unconfirmed unknown flow direction:
+ *    - flowDirection === 'unknown' AND !tx.userConfirmed
+ * 
+ * Note: legacy transactions where flowDirection === undefined are NEVER quarantined.
+ */
+export function isTransactionQuarantined(tx: Transaction): boolean {
+  const flowDir = tx.flowDirection;
+  if (!flowDir) return false;
+
+  const isContradiction =
+    (tx.type === 'income' && flowDir === 'outflow') ||
+    ((tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment') && flowDir === 'inflow') ||
+    (tx.type === 'refund' && flowDir === 'outflow') ||
+    (tx.type === 'loan_received' && flowDir === 'outflow');
+
+  const isUnconfirmedUnknown = flowDir === 'unknown' && !tx.userConfirmed;
+
+  return isContradiction || isUnconfirmedUnknown;
+}
+
+/**
+ * Calculates sum of quarantined amounts grouped strictly by currency.
+ * Never sums across distinct currencies.
+ */
+export function getQuarantinedAmounts(txs: Transaction[]): Record<string, number> {
+  const amounts: Record<string, number> = {};
+  for (const tx of txs) {
+    const curr = tx.currency || 'ILS';
+    amounts[curr] = (amounts[curr] || 0) + Math.abs(tx.amount);
+  }
+  return amounts;
+}
+
+/**
+ * Formats multi-currency amounts for UI display, keeping currencies segregated.
+ * e.g. "₪1,500 | $200"
+ */
+export function formatMultiCurrencyAmounts(amounts: Record<string, number>): string {
+  const entries = Object.entries(amounts).filter(([_, amt]) => amt > 0);
+  if (entries.length === 0) return '0 ₪';
+  const symbols: Record<string, string> = { ILS: '₪', USD: '$', EUR: '€', GBP: '£' };
+  return entries
+    .map(([curr, amt]) => {
+      const sym = symbols[curr] || curr;
+      return `${sym}${Math.round(amt).toLocaleString()}`;
+    })
+    .join(' | ');
 }
 
 export interface PersonalHistoricalAverages {
@@ -162,10 +221,12 @@ export function calculateCashFlowForPeriod(
   // Filter out internal transfers and consolidated card settlements
   const validTransactions = transactions.filter((t) => !t.isInternalTransfer && t.type !== 'transfer');
 
-  // Determine which month to calculate
+  // Determine which month to calculate:
+  // 1. If targetMonthKey is explicitly provided, respect it even if there are 0 transactions.
+  // 2. If targetMonthKey is omitted, pick the most recent historical month with non-transfer data <= CURRENT_APP_MONTH.
+  // 3. If no historical data exists, fallback gracefully to CURRENT_APP_MONTH.
   let monthKey = targetMonthKey;
   if (!monthKey) {
-    // Pick the most recent historical month that is <= CURRENT_APP_MONTH
     const availableMonths = Array.from(
       new Set(
         validTransactions
@@ -190,29 +251,22 @@ export function calculateCashFlowForPeriod(
   let financingInflows = 0;
   let anomaliesCount = 0;
 
+  const quarantinedTransactions: Transaction[] = [];
+  const quarantinedAmounts: Record<string, number> = {};
+
   // Category tracking with refund deduction
   const categoryMap = new Map<string, { gross: number; refunds: number; items: Transaction[] }>();
   // Income sources tracking
   const incomeSourcesMap = new Map<string, number>();
 
   for (const tx of periodTxs) {
-    const flowDir = tx.flowDirection;
-
-    // CONTRADICTION DETECTION & SAFETY QUARANTINE:
-    // If flowDirection directly contradicts transaction type:
-    // 1. type === 'income' but flowDirection === 'outflow': Money left account, cannot be income!
-    // 2. type === 'expense' (or fee/loan_payment) but flowDirection === 'inflow': Money entered account, cannot be expense!
-    // 3. type === 'refund' but flowDirection === 'outflow': Refund cannot be an outflow!
-    // 4. type === 'loan_received' but flowDirection === 'outflow': Loan received cannot be an outflow!
-    const isContradiction =
-      (tx.type === 'income' && flowDir === 'outflow') ||
-      ((tx.type === 'expense' || tx.type === 'fee' || tx.type === 'loan_payment') && flowDir === 'inflow') ||
-      (tx.type === 'refund' && flowDir === 'outflow') ||
-      (tx.type === 'loan_received' && flowDir === 'outflow');
-
-    if (isContradiction) {
+    // CONTRADICTION & UNCONFIRMED UNKNOWN ISOLATION:
+    if (isTransactionQuarantined(tx)) {
       anomaliesCount++;
-      // Safe quarantine: Do NOT corrupt financial calculations with contradictory amounts
+      quarantinedTransactions.push(tx);
+      const curr = tx.currency || 'ILS';
+      quarantinedAmounts[curr] = (quarantinedAmounts[curr] || 0) + Math.abs(tx.amount);
+      // Safe quarantine: Do NOT corrupt financial calculations with contradictory or unverified amounts
       continue;
     }
 
@@ -316,8 +370,11 @@ export function calculateCashFlowForPeriod(
     transactions: periodTxs,
     isCurrentMonth: monthKey === CURRENT_APP_MONTH,
     isFuture: monthKey! > CURRENT_APP_MONTH,
+    isHistorical: monthKey! < CURRENT_APP_MONTH,
     anomaliesCount,
     operatingSavings: Math.round(operatingSavings),
+    quarantinedTransactions,
+    quarantinedAmounts,
   };
 }
 

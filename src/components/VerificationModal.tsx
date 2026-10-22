@@ -45,6 +45,15 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
     }
   }, [transaction?.id]);
 
+  const getCurrencySymbol = (currency?: string): string => {
+    switch (currency) {
+      case 'USD': return '$';
+      case 'EUR': return '€';
+      case 'GBP': return '£';
+      default: return '₪';
+    }
+  };
+
   if (!transaction) return null;
 
   const effectiveCategory = selectedCategory === 'other_custom' ? customCategory : selectedCategory;
@@ -106,8 +115,12 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
               </div>
               <div className="text-left font-mono">
                 <span className="text-xs text-slate-500 dark:text-slate-400 block">סכום העסקה</span>
-                <span className="text-xl font-bold text-[#BE123C] dark:text-rose-400">
-                  ₪{Math.abs(transaction.amount).toLocaleString()}
+                <span className={`text-xl font-bold ${
+                  selectedType === 'income' || selectedType === 'refund'
+                    ? 'text-emerald-700 dark:text-emerald-400'
+                    : 'text-[#BE123C] dark:text-rose-400'
+                }`}>
+                  {getCurrencySymbol(transaction.currency)}{Math.abs(transaction.amount).toLocaleString()}
                 </span>
               </div>
             </div>

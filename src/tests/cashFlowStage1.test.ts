@@ -211,7 +211,153 @@ runTest('Scenario 5: loan_received enters cash flow without inflating operating 
   assert.strictEqual(period.netCashFlow, 12000 + 45000, 'תזרים מזומנים בפועל כולל את תקבול ההלוואה');
 });
 
+// -----------------------------------------------------------------------------
+// Test 6: Dynamic Period Selection & Historical Dataset Labeling
+// -----------------------------------------------------------------------------
+runTest('Scenario 6: Dynamic period selection, graceful empty fallback and historical labeling', () => {
+  // 6.1 Explicit targetMonthKey with zero transactions returns clean empty period object
+  const emptyExplicitPeriod = calculateCashFlowForPeriod([], '2026-01');
+  assert.strictEqual(emptyExplicitPeriod.monthKey, '2026-01', 'Explicit monthKey is honored');
+  assert.strictEqual(emptyExplicitPeriod.income, 0, 'Empty period income is 0');
+  assert.strictEqual(emptyExplicitPeriod.expenses, 0, 'Empty period expenses is 0');
+  assert.strictEqual(emptyExplicitPeriod.transactionCount, 0, 'Empty period transaction count is 0');
+  assert.strictEqual(emptyExplicitPeriod.categoryBreakdown.length, 0, 'Empty period category breakdown is empty');
+  assert.strictEqual(emptyExplicitPeriod.isHistorical, true, '2026-01 is historical (< CURRENT_APP_MONTH)');
+
+  // 6.2 Completely empty dataset without targetMonthKey falls back cleanly without crashing
+  const defaultEmptyPeriod = calculateCashFlowForPeriod([]);
+  assert.ok(defaultEmptyPeriod.monthKey, 'Default empty period has a valid monthKey');
+  assert.strictEqual(defaultEmptyPeriod.transactionCount, 0, 'Default empty period transaction count is 0');
+
+  // 6.3 Historical dataset where latest month is May 2026 (prior to CURRENT_APP_MONTH October 2026)
+  const historicalTx1 = createTx({
+    date: '2026-05-10',
+    amount: 1500,
+    type: 'expense',
+    flowDirection: 'outflow',
+  });
+  const historicalTx2 = createTx({
+    date: '2026-04-12',
+    amount: 800,
+    type: 'expense',
+    flowDirection: 'outflow',
+  });
+  const internalTransferMay = createTx({
+    date: '2026-05-28',
+    amount: 10000,
+    type: 'transfer',
+    isInternalTransfer: true,
+  });
+
+  const resolvedHistoricalPeriod = calculateCashFlowForPeriod([historicalTx1, historicalTx2, internalTransferMay]);
+  assert.strictEqual(resolvedHistoricalPeriod.monthKey, '2026-05', 'Selects latest month with non-transfer data');
+  assert.strictEqual(resolvedHistoricalPeriod.isHistorical, true, 'Identified as historical period (< 2026-10)');
+  assert.strictEqual(resolvedHistoricalPeriod.expenses, 1500, 'Calculates May expenses correctly');
+});
+
+// -----------------------------------------------------------------------------
+// Test 7: Quarantine Isolation & Multi-Currency Segregation
+// -----------------------------------------------------------------------------
+runTest('Scenario 7: Quarantine isolation for contradictions & unconfirmed unknowns, preserving legacy & multi-currency', () => {
+  // 7.1 Contradiction: type === 'expense' but flowDirection === 'inflow' (quarantined)
+  const contradictionTx1 = createTx({
+    id: 'tx-contra-1',
+    date: '2026-09-05',
+    amount: 1000,
+    currency: 'ILS',
+    type: 'expense',
+    flowDirection: 'inflow',
+  });
+
+  // 7.2 Contradiction: type === 'income' but flowDirection === 'outflow' (quarantined)
+  const contradictionTx2 = createTx({
+    id: 'tx-contra-2',
+    date: '2026-09-08',
+    amount: 300,
+    currency: 'USD',
+    type: 'income',
+    flowDirection: 'outflow',
+  });
+
+  // 7.3 Unconfirmed unknown: flowDirection === 'unknown' and userConfirmed === false (quarantined)
+  const unconfirmedUnknownTx = createTx({
+    id: 'tx-unknown-unconfirmed',
+    date: '2026-09-12',
+    amount: 50,
+    currency: 'EUR',
+    type: 'expense',
+    flowDirection: 'unknown',
+    userConfirmed: false,
+  });
+
+  // 7.4 Confirmed unknown: flowDirection === 'unknown' but userConfirmed === true (NOT quarantined)
+  const confirmedUnknownTx = createTx({
+    id: 'tx-unknown-confirmed',
+    date: '2026-09-15',
+    amount: 250,
+    currency: 'ILS',
+    type: 'expense',
+    flowDirection: 'unknown',
+    userConfirmed: true,
+  });
+
+  // 7.5 Legacy transaction: flowDirection === undefined (NOT quarantined, backward compatibility)
+  const legacyTx = createTx({
+    id: 'tx-legacy',
+    date: '2026-09-20',
+    amount: 400,
+    currency: 'ILS',
+    type: 'expense',
+    flowDirection: undefined,
+  });
+
+  // 7.6 Legitimate income
+  const validIncomeTx = createTx({
+    id: 'tx-valid-income',
+    date: '2026-09-01',
+    amount: 8000,
+    currency: 'ILS',
+    type: 'income',
+    flowDirection: 'inflow',
+  });
+
+  const period = calculateCashFlowForPeriod(
+    [
+      contradictionTx1,
+      contradictionTx2,
+      unconfirmedUnknownTx,
+      confirmedUnknownTx,
+      legacyTx,
+      validIncomeTx,
+    ],
+    '2026-09'
+  );
+
+  // Quarantine checks:
+  // Exactly 3 transactions quarantined: contradictionTx1, contradictionTx2, unconfirmedUnknownTx
+  assert.strictEqual(period.quarantinedTransactions.length, 3, 'Exactly 3 transactions are quarantined');
+  const quarantinedIds = period.quarantinedTransactions.map((t) => t.id);
+  assert.ok(quarantinedIds.includes('tx-contra-1'), 'Contradiction 1 in quarantine');
+  assert.ok(quarantinedIds.includes('tx-contra-2'), 'Contradiction 2 in quarantine');
+  assert.ok(quarantinedIds.includes('tx-unknown-unconfirmed'), 'Unconfirmed unknown in quarantine');
+  assert.ok(!quarantinedIds.includes('tx-unknown-confirmed'), 'Confirmed unknown released from quarantine');
+  assert.ok(!quarantinedIds.includes('tx-legacy'), 'Legacy undefined flowDirection released from quarantine');
+
+  // Multi-currency segregation check:
+  // Quarantined amounts must be segregated by currency, NEVER summed into a single number
+  assert.strictEqual(period.quarantinedAmounts.ILS, 1000, 'Quarantined ILS is 1,000');
+  assert.strictEqual(period.quarantinedAmounts.USD, 300, 'Quarantined USD is 300');
+  assert.strictEqual(period.quarantinedAmounts.EUR, 50, 'Quarantined EUR is 50');
+
+  // Calculation isolation check:
+  // Income should be 8,000 only (tx-contra-2 was isolated)
+  assert.strictEqual(period.income, 8000, 'Quarantined income outflow does not corrupt income');
+  // Expenses should be 250 (confirmed unknown) + 400 (legacy) = 650 (tx-contra-1 and unconfirmed unknown were isolated)
+  assert.strictEqual(period.expenses, 650, 'Quarantined expense inflow and unconfirmed unknown do not corrupt expenses');
+});
+
 console.log(`\nStage 1 Base Calculations Summary: ${passedCount} passed, ${failedCount} failed.`);
 if (failedCount > 0) {
   process.exit(1);
 }
+

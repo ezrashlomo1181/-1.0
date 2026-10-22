@@ -17,6 +17,9 @@ import {
   CURRENT_APP_MONTH,
   CategorySummary,
   MonthDataPoint,
+  isTransactionQuarantined,
+  getQuarantinedAmounts,
+  formatMultiCurrencyAmounts,
 } from '../services/financialCalculations';
 import { CashFlowChart } from '../components/charts/CashFlowChart';
 import { ExpenseCategoryDonut } from '../components/charts/ExpenseCategoryDonut';
@@ -257,8 +260,19 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
   const overallPortfolioReturn =
     totalInvestedPrincipal > 0 ? ((totalUnrealizedGain / totalInvestedPrincipal) * 100).toFixed(1) : '0';
 
-  // Find any transactions that need review
-  const pendingReviews = transactions.filter((t) => t.needsReview);
+  // Find transactions that need review or are quarantined
+  // Deduplicate by tx.id so an item is never double counted
+  const combinedReviewMap = new Map<string, Transaction>();
+  for (const t of transactions) {
+    if (t.needsReview || isTransactionQuarantined(t)) {
+      combinedReviewMap.set(t.id, t);
+    }
+  }
+  const pendingReviews = Array.from(combinedReviewMap.values());
+  const quarantinedAll = transactions.filter(isTransactionQuarantined);
+  const quarantinedCount = quarantinedAll.length;
+  const quarantinedAllAmounts = getQuarantinedAmounts(quarantinedAll);
+  const quarantinedFormatted = formatMultiCurrencyAmounts(quarantinedAllAmounts);
 
   // Real dynamic "What Changed" / Anomaly highlights
   interface DynamicInsight {
@@ -283,7 +297,9 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
       id: 'pending-reviews',
       type: 'review',
       title: `זוהו ${pendingReviews.length} עסקאות ללא ודאות סיווג מלאה`,
-      description: `עקרון המערכת: כשאין ודאות מלאה – שואלים אותך במקום לנחש. עסקאות אלו דורשות אימות ידני קצר.`,
+      description: quarantinedCount > 0
+        ? `עקרון המערכת: כשאין ודאות מלאה – שואלים אותך במקום לנחש. ${quarantinedCount} עסקאות מבודדות בהסגר (${quarantinedFormatted}) כדי למנוע עיוות תזרים.`
+        : `עקרון המערכת: כשאין ודאות מלאה – שואלים אותך במקום לנחש. עסקאות אלו דורשות אימות ידני קצר.`,
       badge: 'דורש אימות',
       badgeColor: 'amber',
       actionText: 'אמת עסקאות',
@@ -385,7 +401,7 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
 
   return (
     <div className="space-y-6 pb-12 animate-in fade-in duration-200">
-      {/* Top Banner if items need review */}
+      {/* Top Banner if items need review or are in quarantine */}
       {pendingReviews.length > 0 && (
         <div className="bg-amber-50 dark:bg-amber-950/25 border border-amber-200 dark:border-amber-900/40 rounded-xl p-4 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-xs transition-colors">
           <div className="flex items-start sm:items-center gap-3">
@@ -395,9 +411,14 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
             <div>
               <h4 className="text-xs font-bold text-amber-900 dark:text-amber-200">
                 זוהו {pendingReviews.length} עסקאות ללא ודאות סיווג (למשל: {pendingReviews[0].merchant})
+                {quarantinedCount > 0 && (
+                  <span className="font-normal mr-1.5 text-amber-800 dark:text-amber-300">
+                    — מתוכן {quarantinedCount} בהסגר חשבונאי ({quarantinedFormatted})
+                  </span>
+                )}
               </h4>
               <p className="text-xs text-amber-800/80 dark:text-amber-300/70 mt-0.5">
-                עקרון המערכת: כשאין ודאות מלאה – שואלים אותך במקום לנחש.
+                עקרון המערכת: כשאין ודאות מלאה – שואלים אותך במקום לנחש. עסקאות בהסגר מבודדות מהחישובים עד לאימותך.
               </p>
             </div>
           </div>
@@ -417,8 +438,17 @@ export const DashboardView: React.FC<DashboardViewProps> = ({
           <div className="flex items-center gap-2">
             <h2 className="text-sm font-bold text-[#0F172A] dark:text-white flex items-center gap-1.5">
               <Calendar className="w-4 h-4 text-slate-600 dark:text-slate-400" />
-              <span>תמונת מצב חודשית: {latestPeriod.monthLabel}</span>
+              <span>
+                {latestPeriod.isHistorical
+                  ? `נתונים היסטוריים: ${latestPeriod.monthLabel}`
+                  : `תמונת מצב חודשית: ${latestPeriod.monthLabel}`}
+              </span>
             </h2>
+            {latestPeriod.isHistorical && (
+              <span className="text-[11px] font-medium bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 px-2 py-0.5 rounded border border-amber-200 dark:border-amber-800/60">
+                חודש היסטורי
+              </span>
+            )}
             <span className="text-xs font-mono bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 px-2 py-0.5 rounded-md border border-slate-200 dark:border-slate-700">
               {latestPeriod.transactionCount} עסקאות
             </span>
