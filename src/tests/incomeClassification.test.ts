@@ -146,7 +146,7 @@ runTest('D.1: Supermarket credit in credit card statement is classified as refun
   });
 
   assert.strictEqual(res.type, 'refund');
-  assert.strictEqual(res.category, 'מזון וסופר');
+  assert.strictEqual(res.category, 'מזון וקניות לבית');
   assert.strictEqual(res.needsReview, false);
 });
 
@@ -159,7 +159,7 @@ runTest('D.2: Negative amount on credit card with consumer merchant is classifie
   });
 
   assert.strictEqual(res.type, 'refund');
-  assert.strictEqual(res.category, 'בריאות ופארם');
+  assert.strictEqual(res.category, 'פארם');
   assert.strictEqual(res.needsReview, false);
 });
 
@@ -177,7 +177,7 @@ runTest('E.1: Zara credit card refund is classified as refund reducing clothing 
   });
 
   assert.strictEqual(res.type, 'refund');
-  assert.strictEqual(res.category, 'קניות וביגוד');
+  assert.strictEqual(res.category, 'ביגוד וקניות אישיות');
   assert.strictEqual(res.needsReview, false);
 });
 
@@ -453,7 +453,7 @@ runTest('K.3 (Scenario 3): End-to-end CSV import with single amount column (posi
   const groceryTx = parsed.transactions.find((t) => t.merchant.includes('שופרסל'));
   assert(groceryTx, 'נמצאה עסקת שופרסל');
   assert.strictEqual(groceryTx.type, 'expense');
-  assert.strictEqual(groceryTx.category, 'מזון וסופר');
+  assert.strictEqual(groceryTx.category, 'מזון וקניות לבית');
   assert.strictEqual(groceryTx.amount, 450);
 
   // Overall parser totals
@@ -470,7 +470,7 @@ runTest('K.4 (Scenario 4): Normal expense with negative amount remains expense w
   });
 
   assert.strictEqual(res.type, 'expense');
-  assert.strictEqual(res.category, 'דיור וחשבונות');
+  assert.strictEqual(res.category, 'דיור וחשבונות הבית');
   assert.strictEqual(res.needsReview, false);
 });
 
@@ -483,7 +483,7 @@ runTest('K.5 (Scenario 5): Credit card consumer refund reduces expenses, not inc
   });
 
   assert.strictEqual(res.type, 'refund');
-  assert.strictEqual(res.category, 'קניות וביגוד');
+  assert.strictEqual(res.category, 'ביגוד וקניות אישיות');
   assert.strictEqual(res.needsReview, false);
 });
 
@@ -508,7 +508,7 @@ runTest('K.7 (Scenario 7): Learned rule protection & user customization consiste
       id: 'rule-generic-exp',
       pattern: 'קניות',
       applyTo: 'all_similar',
-      assignedCategory: 'קניות וביגוד',
+      assignedCategory: 'ביגוד וקניות אישיות',
       assignedType: 'expense',
       createdAt: '2026-05-10',
       userPromptBasis: 'אישור משתמש',
@@ -583,7 +583,7 @@ runTest('K.8 (Scenario 8): Cash flow calculations, UI amount sign & serializatio
     accountId: 'acc-poalim',
     accountName: 'פועלים עו"ש',
     paymentMethod: 'credit_card',
-    category: 'מזון וסופר',
+    category: 'מזון וקניות לבית',
     type: 'expense',
     isRecurring: false,
     confidenceScore: 0.95,

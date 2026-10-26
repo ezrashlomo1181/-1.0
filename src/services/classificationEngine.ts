@@ -1,5 +1,6 @@
 import { TransactionType, ConfidenceLevel, LearnedRule } from '../types/financial';
 import { getStoredLearnedRules } from './storage';
+import { isTechnicalTransactionType, resolveToCanonicalExpenseCategory } from './categoriesService';
 
 export interface SemanticClassificationResult {
   category: string;
@@ -27,19 +28,26 @@ export const CATEGORY_MAP: {
       'סופר יודה', 'זול ובגדול', 'קואופ', 'מינימרקט', 'מכולת', 'סופרמרקט', 'ירקות', 'פירות', 'קצביה',
       'דגים', 'מאפיה', 'מאפיית', 'מעדניה', 'פיצוציה', 'פיצוחי', 'טבע קסטל', 'ניצת הדובדבן', 'אניס'
     ],
-    category: 'מזון וסופר',
+    category: 'מזון וקניות לבית',
     type: 'expense'
   },
-  // Dining & Restaurants
+  // Pharm & Baby Products
   {
     keywords: [
-      'וולט', 'wolt', 'תן ביס', '10bis', 'משלוחה', 'ארומה', 'aroma', 'מקדונלדס', 'mcdonalds',
-      'קפה קפה', 'לנדוור', 'גרג', 'ביגה', 'רולדין', 'ארקפה', 'קפית', 'קפה גו', 'פיצה האט',
-      'דומינוס פיצה', 'פיצה', 'בורגר ראנץ', 'בורגרים', 'מוזס', 'bbb', 'אגאדיר', 'גולדה', 'וניליה',
-      'קפה נאמן', 'שניצל', 'פלאפל', 'שווארמה', 'חומוס', 'סושי', 'גפניקה', 'אושי אושי', 'מסעדה',
-      'בית קפה', 'בר', 'פאב', 'טברנה', 'ביסטרו', 'גלידריה', 'מזנון'
+      'סופר פארם', 'סופר-פארם', 'super-pharm', 'be פארם', 'be all', 'בית מרקחת', 'פארם',
+      'iherb', 'אייהרב', 'מטרנה', 'סימילאק', 'טיטולים', 'האגיס', 'פמפרס'
     ],
-    category: 'מסעדות ובילויים',
+    category: 'פארם',
+    type: 'expense'
+  },
+  // Hygiene & Personal Care
+  {
+    keywords: [
+      'מספרה', 'מספרת', 'ברברשופ', 'barber', 'קוסמטיקה', 'מניקור', 'פדיקור', 'ספא',
+      'טיפוח', 'קוסמטיקאית', 'הסרת שיער', 'לייזר', 'ללין', 'laline', 'בודי שופ', 'body shop',
+      'סבון של פעם', 'sabon'
+    ],
+    category: 'היגיינה וטיפוח',
     type: 'expense'
   },
   // Transportation & Fuel
@@ -52,22 +60,43 @@ export const CATEGORY_MAP: {
       'טסלה', 'tesla', 'מוסך', 'טסט', 'מכון רישוי', 'שטיפת רכב', 'כביש 6', 'מנהרות הכרמל',
       'הנתיב המהיר', 'שטיפומט', 'צמיגי', 'חלקי חילוף'
     ],
-    category: 'תחבורה ורכב',
+    category: 'רכב ותחבורה',
     type: 'expense'
   },
-  // Housing, Utilities & Municipal
+  // Housing & Utilities
   {
     keywords: [
-      'שכר דירה', 'שכירות', 'משכנתא', 'ועד בית', 'חברת חשמל', 'חשמל', 'מי אביבים', 'מי כרמל',
+      'שכר דירה', 'שכירות', 'משכנתא', 'משכנתה', 'ועד בית', 'חברת חשמל', 'חשמל', 'מי אביבים', 'מי כרמל',
       'הגיחון', 'מי רעננה', 'פלגי מים', 'עיריית', 'עירייה', 'מועצה אזורית', 'מועצה מקומית',
-      'ארנונה', 'גז יגור', 'אמישראגז', 'סופרגז', 'פזגז', 'דורגז', 'אינטרנט', 'בזק', 'הוט',
-      'hot', 'סלקום', 'פרטנר', 'יס', 'yes', 'wecom', 'גולן טלקום', 'רמי לוי תקשורת', '019',
-      '012', 'פלאפון', 'רימון'
+      'ארנונה', 'גז יגור', 'אמישראגז', 'סופרגז', 'פזגז', 'דורגז'
     ],
-    category: 'דיור וחשבונות',
+    category: 'דיור וחשבונות הבית',
     type: 'expense'
   },
-  // Retail, Clothing & Shopping
+  // Dining, Cafes & Delivery
+  {
+    keywords: [
+      'וולט', 'wolt', 'תן ביס', '10bis', 'משלוחה', 'ארומה', 'aroma', 'מקדונלדס', 'mcdonalds',
+      'קפה קפה', 'לנדוור', 'גרג', 'ביגה', 'רולדין', 'ארקפה', 'קפית', 'קפה גו', 'פיצה האט',
+      'דומינוס פיצה', 'פיצה', 'בורגר ראנץ', 'בורגרים', 'מוזס', 'bbb', 'אגאדיר', 'גולדה', 'וניליה',
+      'קפה נאמן', 'שניצל', 'פלאפל', 'שווארמה', 'חומוס', 'סושי', 'גפניקה', 'אושי אושי', 'מסעדה',
+      'בית קפה', 'בר', 'פאב', 'טברנה', 'ביסטרו', 'גלידריה', 'מזנון'
+    ],
+    category: 'מסעדות, קפה ומשלוחים',
+    type: 'expense'
+  },
+  // Leisure & Entertainment
+  {
+    keywords: [
+      'סינמה סיטי', 'yes planet', 'יס פלאנט', 'הוט סינמה', 'רב חן', 'קולנוע', 'זאפה', 'zappa',
+      'הבימה', 'הקאמרי', 'תיאטרון', 'הופעה', 'כרטיסים', 'איוונטים', 'eventim', 'לאן',
+      'קופת תל אביב', 'לונה פארק', 'סופרלנד', 'באולינג', 'חדר בריחה', 'כושר', 'הולמס פלייס',
+      'קאנטרי', 'ספייס', 'space', 'פרופיט', 'profit', 'חדר כושר', 'סטודיו'
+    ],
+    category: 'פנאי ובילויים',
+    type: 'expense'
+  },
+  // Clothing & Personal Shopping
   {
     keywords: [
       'זארה', 'zara', 'קסטרו', 'castro', 'רנואר', 'renuar', 'h&m', 'hm', 'מנגו', 'mango',
@@ -81,29 +110,41 @@ export const CATEGORY_MAP: {
       'הסטוק', 'דייסון', 'dyson', 'עולם הקולנוע', 'נעלי', 'בגדי', 'אופטיקה', 'אופטיקנה',
       'הלפרין', 'קרביץ', 'סטימצקי', 'צומת ספרים', 'גולף', 'golf', 'קבוצת גולף', 'פולגת', 'אינטימה'
     ],
-    category: 'קניות וביגוד',
+    category: 'ביגוד וקניות אישיות',
     type: 'expense'
   },
-  // Health & Pharmacy
+  // Health & Medicine
   {
     keywords: [
-      'סופר פארם', 'סופר-פארם', 'super-pharm', 'be פארם', 'be all', 'מכבי', 'כללית', 'מאוחדת',
-      'לאומית', 'מדיקל סנטר', 'אסותא', 'בית מרקחת', 'פארם', 'רופא', 'רופאת', 'מרפאת', 'שיניים',
-      'אופטיקה', 'משקפיים', 'פסיכולוג', 'פסיכותרפיה', 'פיזיותרפיה', 'iherb', 'אייהרב', 'ויטמינים'
+      'מכבי', 'כללית', 'מאוחדת', 'לאומית', 'מדיקל סנטר', 'אסותא', 'רופא', 'רופאת', 'מרפאת',
+      'שיניים', 'רופא שיניים', 'מרפאת שיניים', 'אופטיקה', 'משקפיים', 'פסיכולוג', 'פסיכותרפיה',
+      'פיזיותרפיה', 'בית חולים', 'הדסה', 'איכילוב', 'שיבא', 'רמבם', 'בילינסון', 'סורוקה', 'ויטמינים'
     ],
-    category: 'בריאות ופארם',
+    category: 'בריאות ורפואה',
     type: 'expense'
   },
-  // Subscriptions & Tech
+  // Travel & Vacations
   {
     keywords: [
+      'אל על', 'el al', 'ארקיע', 'arkia', 'ישראייר', 'israir', 'וויזאייר', 'wizz', 'איזיגט',
+      'easyjet', 'ראיינאייר', 'ryanair', 'בוקינג', 'booking', 'אייר בי אנד בי', 'airbnb',
+      'מלון', 'מלונות', 'ישרוטל', 'פתאל', 'דן', 'הילטון', 'צימר', 'השכרת רכב', 'hertz',
+      'avis', 'sixt', 'europcar', 'קלאב מד', 'אופיר טורס', 'איסתא', 'הדקה ה-90', 'טיסות', 'חופשה'
+    ],
+    category: 'חופשות ונסיעות',
+    type: 'expense'
+  },
+  // Subscriptions & Communications
+  {
+    keywords: [
+      'בזק', 'הוט', 'hot', 'סלקום', 'פרטנר', 'יס', 'yes', 'wecom', 'גולן טלקום',
+      'רמי לוי תקשורת', '019', '012', 'פלאפון', 'רימון', 'אינטרנט', 'סלולר',
       'נטפליקס', 'netflix', 'ספוטיפיי', 'spotify', 'אפל', 'apple', 'גוגל', 'google',
       'יוטיוב', 'youtube', 'מיקרוסופט', 'microsoft', 'אמזון פריים', 'amazon prime',
       'דיסני', 'disney', 'openai', 'chatgpt', 'github', 'claude', 'anthropic', 'midjourney',
-      'פלייסטיישן', 'playstation', 'steam', 'playtika', 'כושר', 'הולמס פלייס', 'קאנטרי',
-      'ספייס', 'space', 'פרופיט', 'profit', 'חדר כושר', 'סטודיו', 'מנוי'
+      'פלייסטיישן', 'playstation', 'steam', 'playtika', 'מנוי'
     ],
-    category: 'תקשורת וטכנולוגיה',
+    category: 'תקשורת ומנויים',
     type: 'expense'
   },
   // Insurance & Bank Fees
@@ -123,7 +164,7 @@ export const CATEGORY_MAP: {
       'קסם', 'הפקדה לחיסכון', 'ניירות ערך', 'מניות', 'קרן השתלמות', 'קופת גמל', 'פנסיה',
       'קריפטו', 'ביטקוין', 'בינאנס', 'binance', 'קראקן', 'תוכנית חיסכון', 'קופת גמל להשקעה'
     ],
-    category: 'השקעות וחיסכון',
+    category: 'השקעות',
     type: 'investment_contribution'
   },
 ];
@@ -414,7 +455,11 @@ export function classifyTransactionSemantics(params: {
       combined.includes('העברה מבנק'));
 
   // 3. PRIORITY 3: Merchant context lookup
-  let matchedCategory = rawCategory || '';
+  const sanitizedRawCategory = isTechnicalTransactionType(rawCategory)
+    ? ''
+    : (resolveToCanonicalExpenseCategory(rawCategory) || '');
+
+  let matchedCategory = '';
   for (const rule of CATEGORY_MAP) {
     for (const kw of rule.keywords) {
       if (matchesKeyword(combined, kw)) {
@@ -425,13 +470,21 @@ export function classifyTransactionSemantics(params: {
     if (matchedCategory) break;
   }
 
+  if (!matchedCategory && sanitizedRawCategory) {
+    matchedCategory = sanitizedRawCategory;
+  }
+
   const isConsumerCategory = [
-    'קניות וביגוד',
-    'מזון וסופר',
-    'מסעדות ובילויים',
-    'בריאות ופארם',
-    'תחבורה ורכב',
-    'תקשורת וטכנולוגיה',
+    'ביגוד וקניות אישיות',
+    'מזון וקניות לבית',
+    'מסעדות, קפה ומשלוחים',
+    'פארם',
+    'היגיינה וטיפוח',
+    'רכב ותחבורה',
+    'בריאות ורפואה',
+    'פנאי ובילויים',
+    'חופשות ונסיעות',
+    'תקשורת ומנויים',
   ].includes(matchedCategory);
 
   // 4. PRIORITY 4: Handle Credit Rows / Positive Inflows & Explicit Income
@@ -573,15 +626,22 @@ export function validateAndFixTransactionCombination(tx: {
   const mLower = merchant.toLowerCase();
 
   const consumerCategories = [
+    'ביגוד וקניות אישיות',
     'קניות וביגוד',
     'קניות',
     'ביגוד',
+    'מזון וקניות לבית',
     'מזון וסופר',
     'סופרמרקט',
+    'מסעדות, קפה ומשלוחים',
     'מסעדות ובילויים',
     'מסעדות ומשלוחים',
-    'בריאות ופארם',
     'פארם',
+    'היגיינה וטיפוח',
+    'בריאות ורפואה',
+    'בריאות ופארם',
+    'פנאי ובילויים',
+    'חופשות ונסיעות',
   ];
 
   const hasSalaryWords =

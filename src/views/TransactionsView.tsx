@@ -11,7 +11,11 @@ import {
   ArrowUp,
   FileText,
 } from 'lucide-react';
-import { getFixedExpenseCategories } from '../services/categoriesService';
+import {
+  getFixedExpenseCategories,
+  resolveToCanonicalExpenseCategory,
+  isTechnicalTransactionType,
+} from '../services/categoriesService';
 
 interface TransactionsViewProps {
   transactions: Transaction[];
@@ -146,25 +150,13 @@ export function formatAmountColumns(tx: Transaction): {
 
 /**
  * Resolves legacy aliases to the 11 approved clean categories.
+ * Rejects technical transaction types so they never display as categories.
  */
 export function getCanonicalCategoryName(category: string): string {
   if (!category) return '';
   const trimmed = category.trim();
-  switch (trimmed) {
-    case 'מזון וקניות לבית':
-    case 'מזון': return 'מזון וסופר';
-    case 'פארם': return 'פארם ומזון לתינוקות';
-    case 'היגיינה וטיפוח': return 'טואלטיקה וטיפוח';
-    case 'רכב ותחבורה': return 'תחבורה ורכב';
-    case 'דיור וחשבונות': return 'דיור וחשבונות הבית';
-    case 'מסעדות, קפה ומשלוחים': return 'מסעדות ובילויים';
-    case 'פנאי ובילויים': return 'פנאי וספורט';
-    case 'ביגוד וקניות אישיות': return 'קניות וביגוד';
-    case 'חופשות ונסיעות': return 'חופשות וטיסות';
-    case 'תקשורת ומנויים':
-    case 'תקשורת וטכנולוגיה': return 'מנויים ותקשורת';
-    default: return trimmed;
-  }
+  if (isTechnicalTransactionType(trimmed)) return '';
+  return resolveToCanonicalExpenseCategory(trimmed) || trimmed;
 }
 
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
@@ -405,9 +397,21 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       {/* Category */}
                       <td className="py-3 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
-                          <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-[#1F2937] text-[11px] font-medium">
-                            {getCanonicalCategoryName(tx.category)}
-                          </span>
+                          {(() => {
+                            const canonical = getCanonicalCategoryName(tx.category);
+                            if (!canonical) {
+                              return (
+                                <span className="px-2 py-0.5 rounded-md bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60 text-[11px] font-medium">
+                                  דרוש סיווג
+                                </span>
+                              );
+                            }
+                            return (
+                              <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-[#1F2937] text-[11px] font-medium">
+                                {canonical}
+                              </span>
+                            );
+                          })()}
                           {tx.needsReview && (
                             <span
                               className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-950/40 text-amber-800 dark:text-amber-300 border border-amber-200 dark:border-amber-800/60"

@@ -15,7 +15,7 @@ import { CategoryDefinition } from '../types/financial';
 export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Object.freeze([
   {
     id: 'cat_food',
-    name: 'מזון וסופר',
+    name: 'מזון וקניות לבית',
     isCustom: false,
     color: '#059669', // Emerald
     iconName: 'ShoppingCart',
@@ -23,7 +23,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_pharm',
-    name: 'פארם ומזון לתינוקות',
+    name: 'פארם',
     isCustom: false,
     color: '#0284c7', // Sky blue
     iconName: 'Pill',
@@ -31,7 +31,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_hygiene',
-    name: 'טואלטיקה וטיפוח',
+    name: 'היגיינה וטיפוח',
     isCustom: false,
     color: '#ec4899', // Pink
     iconName: 'Sparkles',
@@ -39,7 +39,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_transport',
-    name: 'תחבורה ורכב',
+    name: 'רכב ותחבורה',
     isCustom: false,
     color: '#6366f1', // Indigo
     iconName: 'Car',
@@ -55,7 +55,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_dining',
-    name: 'מסעדות ובילויים',
+    name: 'מסעדות, קפה ומשלוחים',
     isCustom: false,
     color: '#d97706', // Amber
     iconName: 'UtensilsCrossed',
@@ -63,7 +63,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_leisure',
-    name: 'פנאי וספורט',
+    name: 'פנאי ובילויים',
     isCustom: false,
     color: '#8b5cf6', // Violet
     iconName: 'Film',
@@ -71,7 +71,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_shopping',
-    name: 'קניות וביגוד',
+    name: 'ביגוד וקניות אישיות',
     isCustom: false,
     color: '#9333ea', // Purple
     iconName: 'Shirt',
@@ -87,7 +87,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_travel',
-    name: 'חופשות וטיסות',
+    name: 'חופשות ונסיעות',
     isCustom: false,
     color: '#f59e0b', // Warm Amber
     iconName: 'Plane',
@@ -95,7 +95,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_subscriptions',
-    name: 'מנויים ותקשורת',
+    name: 'תקשורת ומנויים',
     isCustom: false,
     color: '#4f46e5', // Deep Indigo
     iconName: 'Smartphone',
@@ -349,3 +349,118 @@ export function createCustomCategoryDefinition(
     description: params.description?.trim(),
   };
 }
+
+// ----------------------------------------------------------------------
+// 5. CANONICAL EXPENSE CATEGORY RESOLUTION & TECHNICAL FILTERING
+// ----------------------------------------------------------------------
+
+/**
+ * Checks whether a given string is a technical transaction type or document artifact
+ * (e.g. "עסקה רגילה (כולל דביט)", "סייקל חו״ל", "דביט", "הוראת קבע") rather than an actual expense category.
+ */
+export function isTechnicalTransactionType(val: string): boolean {
+  if (!val) return false;
+  const s = val.trim().toLowerCase();
+  if (
+    s === 'כללי' ||
+    s === 'אחר' ||
+    s === 'אחר / ללא סיווג' ||
+    s === 'ללא סיווג' ||
+    s.includes('עסקה רגילה') ||
+    s.includes('כולל דביט') ||
+    s.includes('סייקל חו"ל') ||
+    s.includes('סייקל חו״ל') ||
+    s === 'דביט' ||
+    s === 'עסקת דביט' ||
+    s === 'כרטיס דביט' ||
+    s === 'עסקת תשלומים' ||
+    s === 'תשלומים' ||
+    s === 'הוראת קבע' ||
+    s === 'העברה בנקאית' ||
+    s === 'משיכת מזומן' ||
+    s === 'חיוב כרטיס' ||
+    s === 'זיכוי כרטיס'
+  ) {
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Resolves legacy or alternate Hebrew category names to one of the 11 official clean fixed expense categories.
+ * Returns null if the string is empty or represents a technical transaction artifact.
+ */
+export function resolveToCanonicalExpenseCategory(categoryName: string): string | null {
+  if (!categoryName) return null;
+  const trimmed = categoryName.trim();
+  if (isTechnicalTransactionType(trimmed)) {
+    return null;
+  }
+
+  // Check direct exact match with official names
+  const directMatch = FIXED_EXPENSE_CATEGORIES.find((c) => c.name === trimmed);
+  if (directMatch) return directMatch.name;
+
+  // Resolve legacy / alternate names
+  switch (trimmed) {
+    case 'מזון וסופר':
+    case 'מזון':
+    case 'סופרמרקט':
+    case 'מכולת':
+      return 'מזון וקניות לבית';
+
+    case 'פארם ומזון לתינוקות':
+    case 'מוצרי תינוקות':
+      return 'פארם';
+
+    case 'טואלטיקה וטיפוח':
+    case 'קוסמטיקה':
+    case 'מספרה':
+      return 'היגיינה וטיפוח';
+
+    case 'תחבורה ורכב':
+    case 'תחבורה':
+    case 'רכב':
+    case 'דלק':
+      return 'רכב ותחבורה';
+
+    case 'דיור וחשבונות':
+    case 'חשבונות הבית':
+      return 'דיור וחשבונות הבית';
+
+    case 'מסעדות ובילויים':
+    case 'מסעדות ומשלוחים':
+    case 'בתי קפה ומסעדות':
+    case 'מסעדות':
+      return 'מסעדות, קפה ומשלוחים';
+
+    case 'פנאי וספורט':
+    case 'ספורט':
+    case 'כושר':
+      return 'פנאי ובילויים';
+
+    case 'קניות וביגוד':
+    case 'קניות':
+    case 'ביגוד':
+    case 'הלבשה':
+      return 'ביגוד וקניות אישיות';
+
+    case 'בריאות ופארם':
+      return 'בריאות ורפואה';
+
+    case 'חופשות וטיסות':
+    case 'נופש ותיירות':
+    case 'טיסות ומלונות':
+      return 'חופשות ונסיעות';
+
+    case 'מנויים ותקשורת':
+    case 'תקשורת וטכנולוגיה':
+    case 'אינטרנט וסלולר':
+      return 'תקשורת ומנויים';
+
+    default:
+      // Return trimmed if it's already a non-colliding custom category
+      return trimmed;
+  }
+}
+

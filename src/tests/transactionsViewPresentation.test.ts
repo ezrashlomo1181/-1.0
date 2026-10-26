@@ -218,17 +218,17 @@ export function runTransactionsViewPresentationTests(): void {
   console.log('\n--- Group 6: Clean 11 Approved Categories Dropdown ---');
   {
     const approvedNames = [
-      'מזון וסופר',
-      'פארם ומזון לתינוקות',
-      'טואלטיקה וטיפוח',
-      'תחבורה ורכב',
+      'מזון וקניות לבית',
+      'פארם',
+      'היגיינה וטיפוח',
+      'רכב ותחבורה',
       'דיור וחשבונות הבית',
-      'מסעדות ובילויים',
-      'פנאי וספורט',
-      'קניות וביגוד',
+      'מסעדות, קפה ומשלוחים',
+      'פנאי ובילויים',
+      'ביגוד וקניות אישיות',
       'בריאות ורפואה',
-      'חופשות וטיסות',
-      'מנויים ותקשורת',
+      'חופשות ונסיעות',
+      'תקשורת ומנויים',
     ];
 
     const categories = getFixedExpenseCategories().map((c) => c.name);
@@ -244,9 +244,11 @@ export function runTransactionsViewPresentationTests(): void {
     assert(!categories.includes('משיכת מזומן'), 'Test 6.6: "משיכת מזומן" is NOT in categories');
 
     // Canonical category name resolver
-    assert(getCanonicalCategoryName('מזון וקניות לבית') === 'מזון וסופר', 'Test 6.7: Legacy food maps to "מזון וסופר"');
-    assert(getCanonicalCategoryName('תקשורת וטכנולוגיה') === 'מנויים ותקשורת', 'Test 6.8: Legacy comm maps to "מנויים ותקשורת"');
-    assert(getCanonicalCategoryName('מזון וסופר') === 'מזון וסופר', 'Test 6.9: Direct canonical name remains unchanged');
+    assert(getCanonicalCategoryName('מזון וסופר') === 'מזון וקניות לבית', 'Test 6.7: Legacy food maps to "מזון וקניות לבית"');
+    assert(getCanonicalCategoryName('תקשורת וטכנולוגיה') === 'תקשורת ומנויים', 'Test 6.8: Legacy comm maps to "תקשורת ומנויים"');
+    assert(getCanonicalCategoryName('מזון וקניות לבית') === 'מזון וקניות לבית', 'Test 6.9: Direct canonical name remains unchanged');
+    assert(getCanonicalCategoryName('עסקה רגילה (כולל דביט)') === '', 'Test 6.10: Technical transaction type is rejected and returns empty');
+    assert(getCanonicalCategoryName('סייקל חו״ל') === '', 'Test 6.11: Foreign cycle is rejected and returns empty');
   }
 
   console.log('\nTransactions View Presentation Suite: All tests passed successfully.');

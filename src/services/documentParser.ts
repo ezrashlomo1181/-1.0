@@ -15,6 +15,10 @@ import {
   validateAndFixTransactionCombination,
 } from './classificationEngine';
 import {
+  isTechnicalTransactionType,
+  resolveToCanonicalExpenseCategory,
+} from './categoriesService';
+import {
   identifyDocumentRole,
   reconcileCrossDocumentTransactions,
 } from './reconciliationEngine';
@@ -950,6 +954,7 @@ export function buildTransactionObject(params: {
   merchant: string;
   description: string;
   rawCategory?: string;
+  rawActionType?: string;
   ref?: string;
   isCreditRow: boolean;
   isDebitRow: boolean;
@@ -965,6 +970,7 @@ export function buildTransactionObject(params: {
     merchant,
     description,
     rawCategory = '',
+    rawActionType = '',
     ref = '',
     isCreditRow,
     isDebitRow,
@@ -980,10 +986,16 @@ export function buildTransactionObject(params: {
 
   // If the description is a generic classification (e.g. "עסקה רגילה (כולל דביט)"),
   // preserve it truthfully as the description/source description, but do NOT invent a fake merchant name!
-  // If merchant is purely generic, keep merchant as the specific generic string or 'עסקה ללא שם'
-  const isGeneric = isGenericTransactionType(cleanedMerchant);
   const effectiveMerchant = cleanedMerchant || (cleanedDesc ? cleanedDesc : 'עסקה ללא שם');
   const effectiveDescription = cleanedDesc || effectiveMerchant;
+
+  // Preserve any technical classification found in the document (e.g. "עסקה רגילה (כולל דביט)", "סייקל חו״ל")
+  const isTechnicalRawCat = isTechnicalTransactionType(rawCategory);
+  const technicalNote = rawActionType || (isTechnicalRawCat ? rawCategory : '');
+
+  // Category must NEVER inherit technical transaction strings
+  const canonicalExpenseCat = !isTechnicalRawCat ? resolveToCanonicalExpenseCategory(rawCategory) : null;
+  const sanitizedRawCategory = canonicalExpenseCat || '';
 
   const isCreditCardSource =
     institutionInfo.defaultPayment === 'credit_card' ||
@@ -994,8 +1006,8 @@ export function buildTransactionObject(params: {
   // 1. Central Semantic Classification Engine
   const classification = classifyTransactionSemantics({
     merchant: effectiveMerchant,
-    description: effectiveDescription || rawCategory,
-    rawCategory,
+    description: effectiveDescription || sanitizedRawCategory,
+    rawCategory: sanitizedRawCategory,
     isCreditRow,
     isDebitRow,
     amountIsNegative,
@@ -1003,8 +1015,8 @@ export function buildTransactionObject(params: {
   });
 
   // 2. Prevent impossible combinations (e.g. Income + Clothing, Income + Supermarket)
-  const isGenericRawCategory = !rawCategory || rawCategory === 'כללי' || rawCategory === 'אחר / ללא סיווג';
-  const effectiveCategory = isGenericRawCategory ? classification.category : (rawCategory || classification.category);
+  const isGenericRawCategory = !sanitizedRawCategory || sanitizedRawCategory === 'כללי' || sanitizedRawCategory === 'אחר / ללא סיווג';
+  const effectiveCategory = isGenericRawCategory ? classification.category : sanitizedRawCategory;
 
   const validated = validateAndFixTransactionCombination({
     merchant: effectiveMerchant,
@@ -1014,12 +1026,29 @@ export function buildTransactionObject(params: {
 
   const finalType = validated.type;
   let finalCategory = validated.category;
-  if (finalType === 'refund' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי')) {
-    finalCategory = 'החזרים וזיכויים';
-  } else if (finalType === 'income' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי' || !finalCategory)) {
-    finalCategory = 'משכורת והכנסות';
-  } else if (finalType === 'other' && (finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי' || !finalCategory)) {
-    finalCategory = 'אחר / לבירור';
+
+  // Strictly segregate non-expense transaction types from expense categories
+  if (finalType === 'refund') {
+    if (!finalCategory || finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי') {
+      finalCategory = 'החזרים וזיכויים';
+    }
+  } else if (finalType === 'income') {
+    if (!finalCategory || finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי') {
+      finalCategory = 'משכורת והכנסות';
+    }
+  } else if (finalType === 'transfer') {
+    if (!finalCategory || finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי') {
+      finalCategory = 'העברות ומזומן';
+    }
+  } else if (finalType === 'other') {
+    if (!finalCategory || finalCategory === 'אחר / ללא סיווג' || finalCategory === 'כללי') {
+      finalCategory = 'אחר / לבירור';
+    }
+  } else {
+    // For expense transactions, verify that technical strings NEVER leak as a category
+    if (isTechnicalTransactionType(finalCategory) || !finalCategory || finalCategory === 'כללי' || finalCategory === 'אחר / ללא סיווג') {
+      finalCategory = 'אחר / לבירור';
+    }
   }
 
   const confidenceLevel: ConfidenceLevel = classification.isUserRule
@@ -1152,6 +1181,8 @@ export interface HeaderColumnMapping {
   debitCol: number;
   creditCol: number;
   categoryCol: number;
+  actionTypeCol: number;
+  paymentMethodCol: number;
   refCol: number;
   isHeaderRow: boolean;
 }
@@ -1171,6 +1202,8 @@ export function identifyHeaderColumns(rowCells: string[]): HeaderColumnMapping {
   let fDebit = -1;
   let fCredit = -1;
   let fCat = -1;
+  let fActionType = -1;
+  let fPaymentMethod = -1;
   let fRef = -1;
 
   rowCells.forEach((cell, idx) => {
@@ -1264,26 +1297,51 @@ export function identifyHeaderColumns(rowCells: string[]): HeaderColumnMapping {
     }
 
     // -------------------------------------------------------------
-    // 2. DESCRIPTION & MERCHANT VS. ACTION TYPE / CATEGORY
+    // 2. TRUE CATEGORY / SECTOR VS. ACTION TYPE & PAYMENT METHOD
     // -------------------------------------------------------------
-    const isActionTypeOrCategory =
+    const isTrueCategory =
+      t.includes('שם קטגוריה') ||
+      t.includes('קטגוריה') ||
+      t.includes('שם ענף') ||
+      t.includes('ענף מסחר') ||
+      t.includes('ענף בית עסק') ||
+      t.includes('ענף בית העסק') ||
+      t.includes('ענף') ||
+      t.includes('תחום') ||
+      t === 'category' ||
+      t === 'sector';
+
+    const isActionType =
       t.includes('סוג פעולה') ||
       t.includes('סוג הפעולה') ||
       t.includes('סוג עסקה') ||
       t.includes('סוג העסקה') ||
       t.includes('סוג תנועה') ||
       t.includes('סוג התנועה') ||
-      t.includes('קטגוריה') ||
-      t.includes('ענף') ||
-      t === 'category' ||
-      t === 'sector' ||
       t === 'action type' ||
       t === 'transaction type';
 
-    if (isActionTypeOrCategory) {
-      // Prioritize setting category column; NEVER set as primary description
-      if (fCat === -1 || t.includes('סוג פעולה') || t.includes('קטגוריה')) {
+    const isPaymentMethodCol =
+      t.includes('אמצעי תשלום') ||
+      t.includes('אופן תשלום') ||
+      t.includes('סוג כרטיס') ||
+      t === 'payment method' ||
+      t === 'payment mode';
+
+    if (isTrueCategory) {
+      // True category / sector column
+      if (fCat === -1) {
         fCat = idx;
+      }
+    } else if (isActionType) {
+      // Technical action type (e.g. "עסקה רגילה", "סייקל חו״ל", "דביט") - NEVER set as category!
+      if (fActionType === -1) {
+        fActionType = idx;
+      }
+    } else if (isPaymentMethodCol) {
+      // Payment method column
+      if (fPaymentMethod === -1) {
+        fPaymentMethod = idx;
       }
     } else {
       // Explicit Merchant / Payee
@@ -1421,6 +1479,8 @@ export function identifyHeaderColumns(rowCells: string[]): HeaderColumnMapping {
     debitCol: fDebit,
     creditCol: fCredit,
     categoryCol: fCat,
+    actionTypeCol: fActionType,
+    paymentMethodCol: fPaymentMethod,
     refCol: fRef,
     isHeaderRow,
   };
@@ -1453,6 +1513,7 @@ export function extractTransactionsFromRawRows(
   let activeDebitCol = -1;
   let activeCreditCol = -1;
   let activeCategoryCol = -1;
+  let activeActionTypeCol = -1;
   let activeRefCol = -1;
 
   for (let r = 0; r < rawRows.length; r++) {
@@ -1470,6 +1531,7 @@ export function extractTransactionsFromRawRows(
       if (headerMapping.debitCol !== -1) activeDebitCol = headerMapping.debitCol;
       if (headerMapping.creditCol !== -1) activeCreditCol = headerMapping.creditCol;
       if (headerMapping.categoryCol !== -1) activeCategoryCol = headerMapping.categoryCol;
+      if (headerMapping.actionTypeCol !== -1) activeActionTypeCol = headerMapping.actionTypeCol;
       if (headerMapping.refCol !== -1) activeRefCol = headerMapping.refCol;
       continue;
     }
@@ -1517,6 +1579,7 @@ export function extractTransactionsFromRawRows(
 
     const rawDesc = activeDescCol !== -1 ? String(row[activeDescCol] || '').trim() : '';
     const rawCategory = activeCategoryCol !== -1 ? String(row[activeCategoryCol] || '').trim() : '';
+    const rawActionType = activeActionTypeCol !== -1 ? String(row[activeActionTypeCol] || '').trim() : '';
     const rawRef = activeRefCol !== -1 ? String(row[activeRefCol] || '').trim() : '';
 
     let txAmount = 0;
@@ -1577,7 +1640,7 @@ export function extractTransactionsFromRawRows(
     const baseSig = generateRowIdempotencyKey({
       date: normalizedDate,
       amount: txAmount,
-      merchant: rawDesc || rawCategory || 'עסקה ללא פירוט',
+      merchant: rawDesc || 'עסקה ללא פירוט',
       ref: rawRef,
       accountId: institutionInfo.accountId,
       currency: 'ILS',
@@ -1589,9 +1652,10 @@ export function extractTransactionsFromRawRows(
       date: normalizedDate,
       billingDate: normalizedBillingDate,
       amount: txAmount,
-      merchant: rawDesc || rawCategory || 'עסקה ללא פירוט',
+      merchant: rawDesc || 'עסקה ללא פירוט',
       description: rawDesc,
       rawCategory,
+      rawActionType,
       ref: rawRef,
       isCreditRow,
       isDebitRow,
@@ -1810,6 +1874,7 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
   let activeDebitCol = -1;
   let activeCreditCol = -1;
   let activeCategoryCol = -1;
+  let activeActionTypeCol = -1;
   let activeRefCol = -1;
 
   for (let i = 0; i < lines.length; i++) {
@@ -1827,6 +1892,7 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
       if (headerMapping.debitCol !== -1) activeDebitCol = headerMapping.debitCol;
       if (headerMapping.creditCol !== -1) activeCreditCol = headerMapping.creditCol;
       if (headerMapping.categoryCol !== -1) activeCategoryCol = headerMapping.categoryCol;
+      if (headerMapping.actionTypeCol !== -1) activeActionTypeCol = headerMapping.actionTypeCol;
       if (headerMapping.refCol !== -1) activeRefCol = headerMapping.refCol;
       continue;
     }
@@ -1925,6 +1991,7 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
 
     const merchantName = activeDescCol !== -1 && cols[activeDescCol] ? cols[activeDescCol].trim() : 'עסקה ללא שם';
     const rawCategory = activeCategoryCol !== -1 && cols[activeCategoryCol] ? cols[activeCategoryCol].trim() : '';
+    const rawActionType = activeActionTypeCol !== -1 && cols[activeActionTypeCol] ? cols[activeActionTypeCol].trim() : '';
     const rawRef = activeRefCol !== -1 && cols[activeRefCol] ? cols[activeRefCol].trim() : '';
 
     const tx = buildTransactionObject({
@@ -1934,6 +2001,7 @@ export function parseCsvContent(text: string, fileName: string): ParseResult {
       merchant: merchantName,
       description: merchantName,
       rawCategory,
+      rawActionType,
       ref: rawRef,
       isCreditRow,
       isDebitRow,
@@ -2017,6 +2085,7 @@ export function parseHtmlContent(html: string, fileName: string): ParseResult {
     let debitCol = -1;
     let creditCol = -1;
     let categoryCol = -1;
+    let actionTypeCol = -1;
     let refCol = -1;
 
     let headerIndex = -1;
@@ -2033,6 +2102,7 @@ export function parseHtmlContent(html: string, fileName: string): ParseResult {
         debitCol = headerMapping.debitCol;
         creditCol = headerMapping.creditCol;
         if (headerMapping.categoryCol !== -1) categoryCol = headerMapping.categoryCol;
+        if (headerMapping.actionTypeCol !== -1) actionTypeCol = headerMapping.actionTypeCol;
         if (headerMapping.refCol !== -1) refCol = headerMapping.refCol;
         break;
       }
@@ -2118,6 +2188,7 @@ export function parseHtmlContent(html: string, fileName: string): ParseResult {
 
       const merchantName = descCol !== -1 && cells[descCol] ? cells[descCol].trim() : 'עסקה ללא שם';
       const rawCategory = categoryCol !== -1 && cells[categoryCol] ? cells[categoryCol].trim() : '';
+      const rawActionType = actionTypeCol !== -1 && cells[actionTypeCol] ? cells[actionTypeCol].trim() : '';
       const rawRef = refCol !== -1 && cells[refCol] ? cells[refCol].trim() : '';
 
       const tx = buildTransactionObject({
@@ -2127,6 +2198,7 @@ export function parseHtmlContent(html: string, fileName: string): ParseResult {
         merchant: merchantName,
         description: merchantName,
         rawCategory,
+        rawActionType,
         ref: rawRef,
         isCreditRow,
         isDebitRow,

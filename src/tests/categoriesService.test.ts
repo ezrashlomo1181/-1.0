@@ -12,6 +12,8 @@ import {
   getCategoryColor,
   validateCustomCategoryName,
   createCustomCategoryDefinition,
+  isTechnicalTransactionType,
+  resolveToCanonicalExpenseCategory,
 } from '../services/categoriesService.js';
 
 let passedCount = 0;
@@ -39,17 +41,17 @@ runTest('Exactly 11 Fixed Expense Categories with Required Hebrew Names', () => 
   assert.strictEqual(fixed.length, 11, 'Must have exactly 11 fixed expense categories');
 
   const expectedNames = [
-    'מזון וסופר',
-    'פארם ומזון לתינוקות',
-    'טואלטיקה וטיפוח',
-    'תחבורה ורכב',
+    'מזון וקניות לבית',
+    'פארם',
+    'היגיינה וטיפוח',
+    'רכב ותחבורה',
     'דיור וחשבונות הבית',
-    'מסעדות ובילויים',
-    'פנאי וספורט',
-    'קניות וביגוד',
+    'מסעדות, קפה ומשלוחים',
+    'פנאי ובילויים',
+    'ביגוד וקניות אישיות',
     'בריאות ורפואה',
-    'חופשות וטיסות',
-    'מנויים ותקשורת',
+    'חופשות ונסיעות',
+    'תקשורת ומנויים',
   ];
 
   for (const name of expectedNames) {
@@ -105,7 +107,7 @@ runTest('Validation rejects empty, whitespace, and name collisions', () => {
   assert.strictEqual(validateCustomCategoryName('א').valid, false);
 
   // Collision with fixed expense category
-  const fixedCollision = validateCustomCategoryName('מזון וסופר');
+  const fixedCollision = validateCustomCategoryName('מזון וקניות לבית');
   assert.strictEqual(fixedCollision.valid, false);
   assert.ok(fixedCollision.error?.includes('קבועות'));
 
@@ -172,7 +174,7 @@ runTest('Category Resolution by ID, Name, and Color Fallback', () => {
   assert.strictEqual(byName?.id, 'cust_abc_999');
 
   // Color lookup
-  const colorFixed = getCategoryColor('מזון וסופר');
+  const colorFixed = getCategoryColor('מזון וקניות לבית');
   assert.strictEqual(colorFixed, '#059669');
 
   const colorCustom = getCategoryColor('cust_abc_999', custom);
@@ -180,6 +182,41 @@ runTest('Category Resolution by ID, Name, and Color Fallback', () => {
 
   const colorFallback = getCategoryColor('קטגוריה שלא קיימת');
   assert.strictEqual(colorFallback, '#94a3b8');
+});
+
+// -----------------------------------------------------------------------------
+// Test 7: Canonical Resolution & Technical Type Filtering
+// -----------------------------------------------------------------------------
+runTest('Technical transaction strings are identified and blocked from becoming categories', () => {
+  // Technical strings must return true for isTechnicalTransactionType
+  assert.strictEqual(isTechnicalTransactionType('עסקה רגילה (כולל דביט)'), true);
+  assert.strictEqual(isTechnicalTransactionType('עסקה רגילה'), true);
+  assert.strictEqual(isTechnicalTransactionType('דביט'), true);
+  assert.strictEqual(isTechnicalTransactionType('סייקל חו"ל'), true);
+  assert.strictEqual(isTechnicalTransactionType('סייקל חו״ל'), true);
+  assert.strictEqual(isTechnicalTransactionType('כללי'), true);
+  assert.strictEqual(isTechnicalTransactionType('אחר / ללא סיווג'), true);
+  assert.strictEqual(isTechnicalTransactionType('הוראת קבע'), true);
+
+  // Legitimate category names return false
+  assert.strictEqual(isTechnicalTransactionType('מזון וקניות לבית'), false);
+  assert.strictEqual(isTechnicalTransactionType('פארם'), false);
+
+  // resolveToCanonicalExpenseCategory returns null for technical strings
+  assert.strictEqual(resolveToCanonicalExpenseCategory('עסקה רגילה (כולל דביט)'), null);
+  assert.strictEqual(resolveToCanonicalExpenseCategory('סייקל חו״ל'), null);
+
+  // resolveToCanonicalExpenseCategory resolves legacy names to official clean names
+  assert.strictEqual(resolveToCanonicalExpenseCategory('מזון וסופר'), 'מזון וקניות לבית');
+  assert.strictEqual(resolveToCanonicalExpenseCategory('פארם ומזון לתינוקות'), 'פארם');
+  assert.strictEqual(resolveToCanonicalExpenseCategory('טואלטיקה וטיפוח'), 'היגיינה וטיפוח');
+  assert.strictEqual(resolveToCanonicalExpenseCategory('תחבורה ורכב'), 'רכב ותחבורה');
+  assert.strictEqual(resolveToCanonicalExpenseCategory('מסעדות ובילויים'), 'מסעדות, קפה ומשלוחים');
+  assert.strictEqual(resolveToCanonicalExpenseCategory('פנאי וספורט'), 'פנאי ובילויים');
+  assert.strictEqual(resolveToCanonicalExpenseCategory('קניות וביגוד'), 'ביגוד וקניות אישיות');
+  assert.strictEqual(resolveToCanonicalExpenseCategory('חופשות וטיסות'), 'חופשות ונסיעות');
+  assert.strictEqual(resolveToCanonicalExpenseCategory('מנויים ותקשורת'), 'תקשורת ומנויים');
+  assert.strictEqual(resolveToCanonicalExpenseCategory('תקשורת וטכנולוגיה'), 'תקשורת ומנויים');
 });
 
 // Summary

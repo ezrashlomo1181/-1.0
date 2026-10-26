@@ -77,7 +77,8 @@ console.log('--- Group 1: Header Recognition & Priority Tests ---');
   const headers = ['תאריך', 'סוג פעולה', 'תיאור בית עסק', 'חובה'];
   const res = identifyHeaderColumns(headers);
   assert(res.descCol === 2, 'Does not pick סוג פעולה (col 1) as description; chooses תיאור בית עסק (col 2)', `got descCol=${res.descCol}`);
-  assert(res.categoryCol === 1, 'Assigns סוג פעולה to categoryCol (col 1)', `got categoryCol=${res.categoryCol}`);
+  assert(res.actionTypeCol === 1, 'Assigns סוג פעולה to actionTypeCol (col 1)', `got actionTypeCol=${res.actionTypeCol}`);
+  assert(res.categoryCol === -1, 'Never treats סוג פעולה as categoryCol (-1)', `got categoryCol=${res.categoryCol}`);
 }
 
 // 1.8 "סוג פעולה" after "תיאור הפעולה"
@@ -85,7 +86,8 @@ console.log('--- Group 1: Header Recognition & Priority Tests ---');
   const headers = ['תאריך', 'תיאור הפעולה', 'סוג פעולה', 'חובה'];
   const res = identifyHeaderColumns(headers);
   assert(res.descCol === 1, 'Does not overwrite תיאור הפעולה (col 1) with subsequent סוג פעולה (col 2)', `got descCol=${res.descCol}`);
-  assert(res.categoryCol === 2, 'Assigns סוג פעולה to categoryCol (col 2)', `got categoryCol=${res.categoryCol}`);
+  assert(res.actionTypeCol === 2, 'Assigns סוג פעולה to actionTypeCol (col 2)', `got actionTypeCol=${res.actionTypeCol}`);
+  assert(res.categoryCol === -1, 'Never treats סוג פעולה as categoryCol (-1)', `got categoryCol=${res.categoryCol}`);
 }
 
 // 1.9 "סוג פעולה" without any description column
@@ -93,10 +95,22 @@ console.log('--- Group 1: Header Recognition & Priority Tests ---');
   const headers = ['תאריך', 'סוג פעולה', 'חובה'];
   const res = identifyHeaderColumns(headers);
   assert(res.descCol === -1, 'Leaves descCol as -1 when only סוג פעולה exists (safe, no false merchant)', `got descCol=${res.descCol}`);
-  assert(res.categoryCol === 1, 'Captures סוג פעולה as categoryCol (col 1)', `got categoryCol=${res.categoryCol}`);
+  assert(res.actionTypeCol === 1, 'Captures סוג פעולה as actionTypeCol (col 1)', `got actionTypeCol=${res.actionTypeCol}`);
+  assert(res.categoryCol === -1, 'Never treats סוג פעולה as categoryCol (-1)', `got categoryCol=${res.categoryCol}`);
 }
 
-// 1.10 Ambiguous or completely unknown headers
+// 1.10 Explicit category ("ענף" / "קטגוריה") alongside "סוג עסקה"
+{
+  const headers = ['תאריך', 'שם בית עסק', 'סוג עסקה', 'ענף', 'סכום'];
+  const res = identifyHeaderColumns(headers);
+  assert(res.dateCol === 0, 'Maps תאריך to dateCol (0)');
+  assert(res.descCol === 1, 'Maps שם בית עסק to descCol (1)');
+  assert(res.actionTypeCol === 2, 'Maps סוג עסקה to actionTypeCol (2)');
+  assert(res.categoryCol === 3, 'Maps ענף to categoryCol (3)');
+  assert(res.amountCol === 4, 'Maps סכום to amountCol (4)');
+}
+
+// 1.11 Ambiguous or completely unknown headers
 {
   const headers = ['עמודה א', 'עמודה ב', 'מידע כללי'];
   const res = identifyHeaderColumns(headers);
@@ -105,7 +119,7 @@ console.log('--- Group 1: Header Recognition & Priority Tests ---');
   assert(res.descCol === -1, 'descCol remains -1', `got descCol=${res.descCol}`);
 }
 
-// 1.11 Backward compatibility: Israeli Credit Cards (Isracard / Max / Cal)
+// 1.12 Backward compatibility: Israeli Credit Cards (Isracard / Max / Cal)
 {
   const headers = ['תאריך רכישה', 'שם בית עסק', 'סכום עסקה', 'סכום חיוב', 'תאריך חיוב', 'ענף'];
   const res = identifyHeaderColumns(headers);
@@ -117,7 +131,7 @@ console.log('--- Group 1: Header Recognition & Priority Tests ---');
   assert(res.categoryCol === 5, 'Credit card: maps ענף to categoryCol (5)', `got categoryCol=${res.categoryCol}`);
 }
 
-// 1.12 Backward compatibility: Bank Hapoalim / Discount check account
+// 1.13 Backward compatibility: Bank Hapoalim / Discount check account
 {
   const headers = ['תאריך', 'תיאור הפעולה', 'אסמכתא', 'חובה', 'זכות', 'יתרה'];
   const res = identifyHeaderColumns(headers);
@@ -150,18 +164,21 @@ console.log('\n--- Group 2: End-to-End Raw Row Extraction Tests ---');
   assert(txs[0].merchant === 'שופרסל דיל תל אביב', 'Row 1 merchant is שופרסל דיל, NOT עסקה רגילה (כולל דביט)', `got ${txs[0]?.merchant}`);
   assert(txs[0].amount === 250, 'Row 1 amount is 250.00', `got ${txs[0]?.amount}`);
   assert(txs[0].type === 'expense', 'Row 1 type is expense', `got ${txs[0]?.type}`);
+  assert(txs[0].category === 'מזון וקניות לבית', 'Row 1 category is מזון וקניות לבית, NEVER עסקה רגילה (כולל דביט)', `got ${txs[0]?.category}`);
 
   // Row 2 assertions
   assert(txs[1].date === '2026-06-04', 'Row 2 date is transaction date 2026-06-04', `got ${txs[1]?.date}`);
   assert(txs[1].billingDate === '2026-06-10', 'Row 2 billingDate is 2026-06-10', `got ${txs[1]?.billingDate}`);
   assert(txs[1].merchant === 'סופר-פארם דיזנגוף', 'Row 2 merchant is סופר-פארם דיזנגוף', `got ${txs[1]?.merchant}`);
   assert(txs[1].amount === 75.5, 'Row 2 amount is 75.50', `got ${txs[1]?.amount}`);
+  assert(txs[1].category === 'פארם', 'Row 2 category is פארם, NEVER עסקה רגילה (כולל דביט)', `got ${txs[1]?.category}`);
 
   // Row 3 assertions (Income / Salary)
   assert(txs[2].date === '2026-06-08', 'Row 3 date is 2026-06-08', `got ${txs[2]?.date}`);
   assert(txs[2].merchant === 'משכורת חודשית', 'Row 3 merchant is משכורת חודשית', `got ${txs[2]?.merchant}`);
   assert(txs[2].amount === 12000, 'Row 3 amount is 12000.00', `got ${txs[2]?.amount}`);
   assert(txs[2].type === 'income', 'Row 3 type is income', `got ${txs[2]?.type}`);
+  assert(txs[2].category !== 'עסקה רגילה (כולל דביט)' && txs[2].category !== 'מזון וקניות לבית', 'Row 3 category does not pollute expense categories', `got ${txs[2]?.category}`);
 
   // Distinct dates check
   const distinctDates = new Set(txs.map((t) => t.date));
