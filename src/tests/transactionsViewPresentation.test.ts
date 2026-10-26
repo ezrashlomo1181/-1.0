@@ -3,7 +3,9 @@ import {
   formatMerchantAndDescription,
   formatAmountColumns,
   getDisplayDirection,
+  getCanonicalCategoryName,
 } from '../views/TransactionsView';
+import { getFixedExpenseCategories } from '../services/categoriesService';
 import { formatPaymentMethodLabel } from '../components/VerificationModal';
 
 function assert(condition: boolean, message: string, detail?: unknown): void {
@@ -212,8 +214,44 @@ export function runTransactionsViewPresentationTests(): void {
     assert(tx.date !== tx.billingDate, 'Test 5.1: Purchase date and billing date are independent and distinct');
   }
 
+  // --- Group 6: Clean 11 Approved Categories Dropdown & Canonical Names ---
+  console.log('\n--- Group 6: Clean 11 Approved Categories Dropdown ---');
+  {
+    const approvedNames = [
+      'מזון וסופר',
+      'פארם ומזון לתינוקות',
+      'טואלטיקה וטיפוח',
+      'תחבורה ורכב',
+      'דיור וחשבונות הבית',
+      'מסעדות ובילויים',
+      'פנאי וספורט',
+      'קניות וביגוד',
+      'בריאות ורפואה',
+      'חופשות וטיסות',
+      'מנויים ותקשורת',
+    ];
+
+    const categories = getFixedExpenseCategories().map((c) => c.name);
+    assert(categories.length === 11, 'Test 6.1: Exactly 11 categories in dropdown source');
+    for (let i = 0; i < approvedNames.length; i++) {
+      assert(categories[i] === approvedNames[i], `Test 6.2.${i}: Category ${i + 1} is "${approvedNames[i]}"`);
+    }
+
+    // Verify technical/dirty categories are 100% absent
+    assert(!categories.includes('עסקה רגילה (כולל דביט)'), 'Test 6.3: "עסקה רגילה (כולל דביט)" is NOT in categories');
+    assert(!categories.includes('סייקל חו"ל'), 'Test 6.4: "סייקל חו״ל" is NOT in categories');
+    assert(!categories.includes('כללי'), 'Test 6.5: "כללי" is NOT in categories');
+    assert(!categories.includes('משיכת מזומן'), 'Test 6.6: "משיכת מזומן" is NOT in categories');
+
+    // Canonical category name resolver
+    assert(getCanonicalCategoryName('מזון וקניות לבית') === 'מזון וסופר', 'Test 6.7: Legacy food maps to "מזון וסופר"');
+    assert(getCanonicalCategoryName('תקשורת וטכנולוגיה') === 'מנויים ותקשורת', 'Test 6.8: Legacy comm maps to "מנויים ותקשורת"');
+    assert(getCanonicalCategoryName('מזון וסופר') === 'מזון וסופר', 'Test 6.9: Direct canonical name remains unchanged');
+  }
+
   console.log('\nTransactions View Presentation Suite: All tests passed successfully.');
 }
 
 runTransactionsViewPresentationTests();
+
 

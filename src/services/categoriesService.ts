@@ -15,7 +15,7 @@ import { CategoryDefinition } from '../types/financial';
 export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Object.freeze([
   {
     id: 'cat_food',
-    name: 'מזון וקניות לבית',
+    name: 'מזון וסופר',
     isCustom: false,
     color: '#059669', // Emerald
     iconName: 'ShoppingCart',
@@ -23,15 +23,15 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_pharm',
-    name: 'פארם',
+    name: 'פארם ומזון לתינוקות',
     isCustom: false,
     color: '#0284c7', // Sky blue
     iconName: 'Pill',
-    description: 'רשתות פארם, מוצרי עזרה ראשונה ותרופות ללא מרשם',
+    description: 'רשתות פארם, מוצרי תינוקות, עזרה ראשונה ותרופות ללא מרשם',
   },
   {
     id: 'cat_hygiene',
-    name: 'היגיינה וטיפוח',
+    name: 'טואלטיקה וטיפוח',
     isCustom: false,
     color: '#ec4899', // Pink
     iconName: 'Sparkles',
@@ -39,7 +39,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_transport',
-    name: 'רכב ותחבורה',
+    name: 'תחבורה ורכב',
     isCustom: false,
     color: '#6366f1', // Indigo
     iconName: 'Car',
@@ -55,7 +55,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_dining',
-    name: 'מסעדות, קפה ומשלוחים',
+    name: 'מסעדות ובילויים',
     isCustom: false,
     color: '#d97706', // Amber
     iconName: 'UtensilsCrossed',
@@ -63,15 +63,15 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_leisure',
-    name: 'פנאי ובילויים',
+    name: 'פנאי וספורט',
     isCustom: false,
     color: '#8b5cf6', // Violet
     iconName: 'Film',
-    description: 'קולנוע, הופעות, תיאטרון, מופעים, תרבות ואטרקציות',
+    description: 'קולנוע, הופעות, תיאטרון, חדרי כושר, חוגים וספורט',
   },
   {
     id: 'cat_shopping',
-    name: 'ביגוד וקניות אישיות',
+    name: 'קניות וביגוד',
     isCustom: false,
     color: '#9333ea', // Purple
     iconName: 'Shirt',
@@ -87,7 +87,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_travel',
-    name: 'חופשות ונסיעות',
+    name: 'חופשות וטיסות',
     isCustom: false,
     color: '#f59e0b', // Warm Amber
     iconName: 'Plane',
@@ -95,7 +95,7 @@ export const FIXED_EXPENSE_CATEGORIES: ReadonlyArray<CategoryDefinition> = Objec
   },
   {
     id: 'cat_subscriptions',
-    name: 'תקשורת ומנויים',
+    name: 'מנויים ותקשורת',
     isCustom: false,
     color: '#4f46e5', // Deep Indigo
     iconName: 'Smartphone',

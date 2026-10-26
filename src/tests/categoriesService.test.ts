@@ -39,17 +39,17 @@ runTest('Exactly 11 Fixed Expense Categories with Required Hebrew Names', () => 
   assert.strictEqual(fixed.length, 11, 'Must have exactly 11 fixed expense categories');
 
   const expectedNames = [
-    'מזון וקניות לבית',
-    'פארם',
-    'היגיינה וטיפוח',
-    'רכב ותחבורה',
+    'מזון וסופר',
+    'פארם ומזון לתינוקות',
+    'טואלטיקה וטיפוח',
+    'תחבורה ורכב',
     'דיור וחשבונות הבית',
-    'מסעדות, קפה ומשלוחים',
-    'פנאי ובילויים',
-    'ביגוד וקניות אישיות',
+    'מסעדות ובילויים',
+    'פנאי וספורט',
+    'קניות וביגוד',
     'בריאות ורפואה',
-    'חופשות ונסיעות',
-    'תקשורת ומנויים',
+    'חופשות וטיסות',
+    'מנויים ותקשורת',
   ];
 
   for (const name of expectedNames) {
@@ -105,7 +105,7 @@ runTest('Validation rejects empty, whitespace, and name collisions', () => {
   assert.strictEqual(validateCustomCategoryName('א').valid, false);
 
   // Collision with fixed expense category
-  const fixedCollision = validateCustomCategoryName('מזון וקניות לבית');
+  const fixedCollision = validateCustomCategoryName('מזון וסופר');
   assert.strictEqual(fixedCollision.valid, false);
   assert.ok(fixedCollision.error?.includes('קבועות'));
 
@@ -172,7 +172,7 @@ runTest('Category Resolution by ID, Name, and Color Fallback', () => {
   assert.strictEqual(byName?.id, 'cust_abc_999');
 
   // Color lookup
-  const colorFixed = getCategoryColor('מזון וקניות לבית');
+  const colorFixed = getCategoryColor('מזון וסופר');
   assert.strictEqual(colorFixed, '#059669');
 
   const colorCustom = getCategoryColor('cust_abc_999', custom);

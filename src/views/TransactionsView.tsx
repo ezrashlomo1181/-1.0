@@ -11,6 +11,7 @@ import {
   ArrowUp,
   FileText,
 } from 'lucide-react';
+import { getFixedExpenseCategories } from '../services/categoriesService';
 
 interface TransactionsViewProps {
   transactions: Transaction[];
@@ -143,6 +144,29 @@ export function formatAmountColumns(tx: Transaction): {
   };
 }
 
+/**
+ * Resolves legacy aliases to the 11 approved clean categories.
+ */
+export function getCanonicalCategoryName(category: string): string {
+  if (!category) return '';
+  const trimmed = category.trim();
+  switch (trimmed) {
+    case 'מזון וקניות לבית':
+    case 'מזון': return 'מזון וסופר';
+    case 'פארם': return 'פארם ומזון לתינוקות';
+    case 'היגיינה וטיפוח': return 'טואלטיקה וטיפוח';
+    case 'רכב ותחבורה': return 'תחבורה ורכב';
+    case 'דיור וחשבונות': return 'דיור וחשבונות הבית';
+    case 'מסעדות, קפה ומשלוחים': return 'מסעדות ובילויים';
+    case 'פנאי ובילויים': return 'פנאי וספורט';
+    case 'ביגוד וקניות אישיות': return 'קניות וביגוד';
+    case 'חופשות ונסיעות': return 'חופשות וטיסות';
+    case 'תקשורת ומנויים':
+    case 'תקשורת וטכנולוגיה': return 'מנויים ותקשורת';
+    default: return trimmed;
+  }
+}
+
 export const TransactionsView: React.FC<TransactionsViewProps> = ({
   transactions,
   searchQuery,
@@ -155,14 +179,19 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
   const [onlyNeedsReview, setOnlyNeedsReview] = useState<boolean>(false);
   const [sortDirection, setSortDirection] = useState<'desc' | 'asc'>('desc'); // Default: newest first
 
-  // Extract unique categories
-  const categories = Array.from(new Set(transactions.map((t) => t.category).filter(Boolean)));
+  // Single Source of Truth: exactly the 11 approved expense categories in the requested order
+  const categories = getFixedExpenseCategories().map((c) => c.name);
 
   // Filter transactions
   const filtered = transactions
     .filter((tx) => {
       if (onlyNeedsReview && !tx.needsReview) return false;
-      if (selectedCategory !== 'all' && tx.category !== selectedCategory) return false;
+      if (selectedCategory !== 'all') {
+        const canonicalCat = getCanonicalCategoryName(tx.category);
+        if (canonicalCat !== selectedCategory && tx.category !== selectedCategory) {
+          return false;
+        }
+      }
       if (selectedType !== 'all') {
         if (selectedType === 'internal' && !tx.isInternalTransfer) return false;
         if (selectedType === 'income' && tx.type !== 'income') return false;
@@ -377,7 +406,7 @@ export const TransactionsView: React.FC<TransactionsViewProps> = ({
                       <td className="py-3 px-4 whitespace-nowrap">
                         <div className="flex items-center gap-1.5">
                           <span className="px-2 py-0.5 rounded-md bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 border border-slate-200 dark:border-[#1F2937] text-[11px] font-medium">
-                            {tx.category}
+                            {getCanonicalCategoryName(tx.category)}
                           </span>
                           {tx.needsReview && (
                             <span
