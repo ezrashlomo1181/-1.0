@@ -126,6 +126,9 @@ export interface Transaction {
   linkedTransactionIds?: string[];
   reconciliationEvidence?: string;
   isAggregateSettlement?: boolean; // true if bank consolidated card debit matched to detailed transactions
+  parentTransactionId?: string; // ID of parent bank settlement for child card transactions
+  cardLastDigits?: string; // Last 4 digits of card (e.g. "1234")
+  statementTotalBilled?: number; // Total billed amount from credit card statement header if present
   isFuture?: boolean; // true if transaction date is in the future relative to current date
   flowDirection?: 'inflow' | 'outflow' | 'unknown'; // Verified financial flow direction from source row
 

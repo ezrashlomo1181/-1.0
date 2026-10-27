@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { BudgetCategory, Transaction } from '../types/financial';
 import { calculateCashFlowForPeriod } from '../services/financialCalculations';
+import { resolveToCanonicalExpenseCategory } from '../services/categoriesService';
 import {
   Plus,
   AlertTriangle,
@@ -193,7 +194,10 @@ export const BudgetView: React.FC<BudgetViewProps> = ({
           const isEditing = editingId === b.id;
 
           const catTransactions = transactions.filter(
-            (t) => t.category === b.category && !t.isInternalTransfer
+            (t) =>
+              (t.category === b.category ||
+                resolveToCanonicalExpenseCategory(t.category) === b.category) &&
+              !t.isInternalTransfer
           );
 
           return (

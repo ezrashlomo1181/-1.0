@@ -333,7 +333,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     accountId: 'acc-isracard',
     accountName: 'ישראכרט Gold Mastercard',
     paymentMethod: 'credit_card',
-    category: 'מזון וסופר',
+    category: 'מזון וקניות לבית',
     type: 'expense',
     isRecurring: false,
     confidenceScore: 0.99,
@@ -351,7 +351,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     accountId: 'acc-isracard',
     accountName: 'ישראכרט Gold Mastercard',
     paymentMethod: 'credit_card',
-    category: 'מזון וסופר',
+    category: 'מזון וקניות לבית',
     type: 'expense',
     isRecurring: false,
     confidenceScore: 0.99,
@@ -369,7 +369,7 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
     accountId: 'acc-isracard',
     accountName: 'ישראכרט Gold Mastercard',
     paymentMethod: 'credit_card',
-    category: 'מזון וסופר',
+    category: 'מזון וקניות לבית',
     type: 'expense',
     isRecurring: false,
     confidenceScore: 0.99,
@@ -575,15 +575,15 @@ export const INITIAL_TRANSACTIONS: Transaction[] = [
 ];
 
 export const INITIAL_BUDGETS: BudgetCategory[] = [
-  { id: 'b-housing', category: 'דיור', allocated: 6600, spent: 6520, previousMonthSpent: 6520, suggestedAmount: 6600 },
-  { id: 'b-food', category: 'מזון וסופר', allocated: 2600, spent: 2370, previousMonthSpent: 2450, suggestedAmount: 2500 },
-  { id: 'b-restaurants', category: 'מסעדות ומשלוחים', allocated: 1200, spent: 950, previousMonthSpent: 1100, suggestedAmount: 1100 },
-  { id: 'b-transport', category: 'תחבורה', allocated: 900, spent: 680, previousMonthSpent: 820, suggestedAmount: 850 },
-  { id: 'b-shopping', category: 'קניות', allocated: 1500, spent: 1080, previousMonthSpent: 1400, suggestedAmount: 1300 },
-  { id: 'b-bills', category: 'חשבונות', allocated: 800, spent: 670, previousMonthSpent: 750, suggestedAmount: 750 },
-  { id: 'b-subscriptions', category: 'מנויים', allocated: 350, spent: 295, previousMonthSpent: 295, suggestedAmount: 320 },
-  { id: 'b-health', category: 'ביטוחים ובריאות', allocated: 650, spent: 620, previousMonthSpent: 620, suggestedAmount: 650 },
-  { id: 'b-entertainment', category: 'בילויים ופנאי', allocated: 800, spent: 540, previousMonthSpent: 780, suggestedAmount: 700 },
+  { id: 'b-housing', category: 'דיור וחשבונות הבית', allocated: 7400, spent: 7190, previousMonthSpent: 7270, suggestedAmount: 7350 },
+  { id: 'b-food', category: 'מזון וקניות לבית', allocated: 2600, spent: 2370, previousMonthSpent: 2450, suggestedAmount: 2500 },
+  { id: 'b-restaurants', category: 'מסעדות, קפה ומשלוחים', allocated: 1200, spent: 950, previousMonthSpent: 1100, suggestedAmount: 1100 },
+  { id: 'b-transport', category: 'רכב ותחבורה', allocated: 900, spent: 680, previousMonthSpent: 820, suggestedAmount: 850 },
+  { id: 'b-shopping', category: 'ביגוד וקניות אישיות', allocated: 1500, spent: 1080, previousMonthSpent: 1400, suggestedAmount: 1300 },
+  { id: 'b-pharm', category: 'פארם', allocated: 400, spent: 320, previousMonthSpent: 380, suggestedAmount: 380 },
+  { id: 'b-subscriptions', category: 'תקשורת ומנויים', allocated: 350, spent: 295, previousMonthSpent: 295, suggestedAmount: 320 },
+  { id: 'b-health', category: 'בריאות ורפואה', allocated: 650, spent: 620, previousMonthSpent: 620, suggestedAmount: 650 },
+  { id: 'b-entertainment', category: 'פנאי ובילויים', allocated: 800, spent: 540, previousMonthSpent: 780, suggestedAmount: 700 },
 ];
 
 export const INITIAL_GOALS: FinancialGoal[] = [

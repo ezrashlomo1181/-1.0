@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { LearnedRule, TransactionType } from '../types/financial';
+import { getFixedExpenseCategories } from '../services/categoriesService';
 import { X, Sparkles, Check, AlertCircle } from 'lucide-react';
 
 interface EditRuleModalProps {
@@ -40,20 +41,12 @@ export const EditRuleModal: React.FC<EditRuleModalProps> = ({
   };
 
   const categories = [
-    'מזון וסופר',
-    'מסעדות ובילויים',
+    ...getFixedExpenseCategories().map((c) => c.name),
     'משכורת והכנסות',
-    'קניות וביגוד',
-    'תחבורה ורכב',
-    'דיור וחשבונות',
-    'תקשורת וטכנולוגיה',
-    'בריאות ופארם',
-    'חינוך וילדים',
-    'ביטוח ופיננסים',
-    'השקעות וחיסכון',
     'העברות ומזומן',
-    'לא ידוע / לבירור',
-    'אחר / כללי',
+    'החזרים וזיכויים',
+    'השקעות',
+    'אחר / לבירור',
   ];
 
   return (

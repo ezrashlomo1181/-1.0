@@ -4,6 +4,8 @@ import {
   formatAmountColumns,
   getDisplayDirection,
   getCanonicalCategoryName,
+  matchesTransactionFilter,
+  buildHierarchicalTransactions,
 } from '../views/TransactionsView';
 import { getFixedExpenseCategories } from '../services/categoriesService';
 import { formatPaymentMethodLabel } from '../components/VerificationModal';
@@ -251,9 +253,148 @@ export function runTransactionsViewPresentationTests(): void {
     assert(getCanonicalCategoryName('סייקל חו״ל') === '', 'Test 6.11: Foreign cycle is rejected and returns empty');
   }
 
+  // --- Group 7: Hierarchical View, Nesting & Filtering Tests (Stage 2) ---
+  console.log('\n--- Group 7: Hierarchical View, Nesting & Filtering Tests ---');
+  {
+    // Setup test dataset: 1 parent bank settlement, 2 child card transactions, 1 standalone bank transaction
+    const bankSettlement: Transaction = createBaseTx({
+      id: 'settlement-1',
+      date: '2026-10-10',
+      merchant: 'חיוב כרטיס אשראי ישראכרט',
+      description: 'חיוב מרוכז ספטמבר',
+      amount: 450,
+      flowDirection: 'outflow',
+      type: 'transfer',
+      isInternalTransfer: true,
+      isAggregateSettlement: true,
+      reconciliationStatus: 'settlement_matched',
+      cardLastDigits: '4567',
+      linkedTransactionIds: ['card-tx-1', 'card-tx-2'],
+    });
+
+    const cardTx1: Transaction = createBaseTx({
+      id: 'card-tx-1',
+      date: '2026-09-15',
+      merchant: 'קופי טיים',
+      description: 'קפה ומאפה',
+      category: 'מסעדות, קפה ומשלוחים',
+      amount: 50,
+      flowDirection: 'outflow',
+      type: 'expense',
+      parentTransactionId: 'settlement-1',
+      reconciliationStatus: 'reconciled',
+      sourceDocumentType: 'credit_card_statement',
+    });
+
+    const cardTx2: Transaction = createBaseTx({
+      id: 'card-tx-2',
+      date: '2026-09-20',
+      merchant: 'שופרסל שלי',
+      description: 'קניות שבועיות',
+      category: 'מזון וקניות לבית',
+      amount: 400,
+      flowDirection: 'outflow',
+      type: 'expense',
+      parentTransactionId: 'settlement-1',
+      reconciliationStatus: 'reconciled',
+      sourceDocumentType: 'credit_card_statement',
+    });
+
+    const standaloneTx: Transaction = createBaseTx({
+      id: 'standalone-tx-1',
+      date: '2026-10-01',
+      merchant: 'ארנונה עיריית ירושלים',
+      description: 'תשלום ארנונה',
+      category: 'דיור וחשבונות הבית',
+      amount: 800,
+      flowDirection: 'outflow',
+      type: 'expense',
+      sourceDocumentType: 'bank_statement',
+    });
+
+    const allTxs = [bankSettlement, cardTx1, cardTx2, standaloneTx];
+
+    // Test 7.1: Confirmed child transactions are strictly excluded from root level
+    const defaultItems = buildHierarchicalTransactions(allTxs, '', 'all', 'all', false, 'desc');
+    assert(defaultItems.length === 2, 'Test 7.1: Exactly 2 root items (parent settlement + standalone tx, child txs excluded from root)');
+    const rootIds = defaultItems.map((item) => item.parent.id);
+    assert(rootIds.includes('settlement-1'), 'Test 7.1: Parent settlement is present at root level');
+    assert(rootIds.includes('standalone-tx-1'), 'Test 7.1: Standalone transaction is present at root level');
+    assert(!rootIds.includes('card-tx-1'), 'Test 7.1: Child tx 1 is NOT present at root level');
+    assert(!rootIds.includes('card-tx-2'), 'Test 7.1: Child tx 2 is NOT present at root level');
+
+    // Test 7.2: Parent item contains both child transactions
+    const parentItem = defaultItems.find((item) => item.parent.id === 'settlement-1')!;
+    assert(parentItem.hasChildren === true, 'Test 7.2: Parent item hasChildren is true');
+    assert(parentItem.isConfirmedSettlement === true, 'Test 7.2: Parent item isConfirmedSettlement is true');
+    assert(parentItem.children.length === 2, 'Test 7.2: Parent contains exactly 2 children');
+    assert(parentItem.children[0].id === 'card-tx-2', 'Test 7.2: Descending sort puts newer card-tx-2 first');
+    assert(parentItem.children[1].id === 'card-tx-1', 'Test 7.2: Descending sort puts older card-tx-1 second');
+
+    // Test 7.3: Category filter on child transaction preserves parent context
+    const catFilteredItems = buildHierarchicalTransactions(allTxs, '', 'מסעדות, קפה ומשלוחים', 'all', false, 'desc');
+    assert(catFilteredItems.length === 1, 'Test 7.3: Exactly 1 parent returned when child matches category filter');
+    const filteredParent = catFilteredItems[0];
+    assert(filteredParent.parent.id === 'settlement-1', 'Test 7.3: Parent settlement retained as context container');
+    assert(filteredParent.matchingChildren.length === 1, 'Test 7.3: Only matching child is returned in matchingChildren');
+    assert(filteredParent.matchingChildren[0].id === 'card-tx-1', 'Test 7.3: Matching child is card-tx-1 (קופי טיים)');
+    assert(filteredParent.children.length === 2, 'Test 7.3: Full children array is preserved for reference');
+
+    // Test 7.4: Text search on child merchant preserves parent context
+    const searchFilteredItems = buildHierarchicalTransactions(allTxs, 'קופי', 'all', 'all', false, 'desc');
+    assert(searchFilteredItems.length === 1, 'Test 7.4: Parent returned when child merchant matches text search');
+    assert(searchFilteredItems[0].matchingChildren.length === 1, 'Test 7.4: matchingChildren contains 1 match');
+    assert(searchFilteredItems[0].matchingChildren[0].merchant === 'קופי טיים', 'Test 7.4: Matched merchant is "קופי טיים"');
+
+    // Test 7.5: Search that matches neither parent nor children excludes parent
+    const nonMatchingItems = buildHierarchicalTransactions(allTxs, 'חופשה באילת', 'all', 'all', false, 'desc');
+    assert(nonMatchingItems.length === 0, 'Test 7.5: Parent excluded when neither parent nor any child matches search');
+
+    // Test 7.6: Partial / unreconciled / needsReview bank settlement remains standalone root row
+    const ambiguousSettlement: Transaction = createBaseTx({
+      id: 'ambiguous-settlement',
+      date: '2026-10-15',
+      merchant: 'חיוב כרטיס אשראי',
+      amount: 999,
+      flowDirection: 'outflow',
+      type: 'expense',
+      isInternalTransfer: false,
+      isAggregateSettlement: true,
+      reconciliationStatus: 'partial',
+      needsReview: true,
+      reviewReason: 'זוהו שני כרטיסים בעלי סכום זהה',
+    });
+    const ambiguousItems = buildHierarchicalTransactions([ambiguousSettlement], '', 'all', 'all', false, 'desc');
+    assert(ambiguousItems.length === 1, 'Test 7.6: Ambiguous settlement is returned as root item');
+    assert(ambiguousItems[0].hasChildren === false, 'Test 7.6: Ambiguous settlement does not have confirmed children');
+    assert(ambiguousItems[0].isConfirmedSettlement === false, 'Test 7.6: isConfirmedSettlement is false');
+    assert(ambiguousItems[0].parent.needsReview === true, 'Test 7.6: needsReview remains true on ambiguous settlement');
+
+    // Test 7.7: Orphaned child transaction safely appears as root standalone row
+    const orphanChild: Transaction = createBaseTx({
+      id: 'orphan-card-tx',
+      date: '2026-09-25',
+      merchant: 'ספוטיפיי',
+      category: 'תקשורת ומנויים',
+      amount: 29.9,
+      parentTransactionId: 'non-existent-parent-id',
+      sourceDocumentType: 'credit_card_statement',
+    });
+    const orphanItems = buildHierarchicalTransactions([orphanChild], '', 'all', 'all', false, 'desc');
+    assert(orphanItems.length === 1, 'Test 7.7: Orphan child whose parent is absent is safely shown at root level');
+    assert(orphanItems[0].parent.id === 'orphan-card-tx', 'Test 7.7: Orphan child is root item');
+
+    // Test 7.8: Immutability - original transaction properties are untouched
+    assert(bankSettlement.amount === 450, 'Test 7.8: Bank settlement amount immutable');
+    assert(cardTx1.amount === 50, 'Test 7.8: Child tx amount immutable');
+    assert(cardTx1.category === 'מסעדות, קפה ומשלוחים', 'Test 7.8: Child category immutable');
+    assert(cardTx1.type === 'expense', 'Test 7.8: Child type immutable');
+  }
+
   console.log('\nTransactions View Presentation Suite: All tests passed successfully.');
 }
 
 runTransactionsViewPresentationTests();
+
 
 

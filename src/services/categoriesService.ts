@@ -366,10 +366,17 @@ export function isTechnicalTransactionType(val: string): boolean {
     s === 'אחר' ||
     s === 'אחר / ללא סיווג' ||
     s === 'ללא סיווג' ||
+    s === 'שונות' ||
+    s === 'שירותים' ||
+    s === 'שירותים כלליים' ||
+    s === 'עסקאות אינטרנט' ||
+    s === 'עסקה באינטרנט' ||
     s.includes('עסקה רגילה') ||
     s.includes('כולל דביט') ||
     s.includes('סייקל חו"ל') ||
     s.includes('סייקל חו״ל') ||
+    s.includes('עסקאות חו"ל') ||
+    s.includes('עסקאות חו״ל') ||
     s === 'דביט' ||
     s === 'עסקת דביט' ||
     s === 'כרטיס דביט' ||
@@ -401,66 +408,84 @@ export function resolveToCanonicalExpenseCategory(categoryName: string): string 
   const directMatch = FIXED_EXPENSE_CATEGORIES.find((c) => c.name === trimmed);
   if (directMatch) return directMatch.name;
 
-  // Resolve legacy / alternate names
+  // Resolve legacy / alternate names & unambiguous credit card sectors
   switch (trimmed) {
     case 'מזון וסופר':
     case 'מזון':
     case 'סופרמרקט':
     case 'מכולת':
+    case 'רשתות שיווק ומזון':
+    case 'סופרמרקטים':
       return 'מזון וקניות לבית';
 
     case 'פארם ומזון לתינוקות':
     case 'מוצרי תינוקות':
+    case 'בתי מרקחת':
       return 'פארם';
 
     case 'טואלטיקה וטיפוח':
     case 'קוסמטיקה':
     case 'מספרה':
+    case 'קוסמטיקה וטיפוח':
+    case 'מספרות ויופי':
       return 'היגיינה וטיפוח';
 
     case 'תחבורה ורכב':
     case 'תחבורה':
     case 'רכב':
     case 'דלק':
+    case 'דלק ושמנים':
+    case 'תחבורה ציבורית':
       return 'רכב ותחבורה';
 
     case 'דיור וחשבונות':
     case 'חשבונות הבית':
+    case 'חשבונות':
       return 'דיור וחשבונות הבית';
 
     case 'מסעדות ובילויים':
     case 'מסעדות ומשלוחים':
     case 'בתי קפה ומסעדות':
     case 'מסעדות':
+    case 'מזון ואירוח':
+    case 'בתי קפה':
       return 'מסעדות, קפה ומשלוחים';
 
     case 'פנאי וספורט':
     case 'ספורט':
     case 'כושר':
+    case 'מופעים ופנאי':
       return 'פנאי ובילויים';
 
     case 'קניות וביגוד':
     case 'קניות':
     case 'ביגוד':
     case 'הלבשה':
+    case 'הלבשה והנעלה':
+    case 'אופנה והנעלה':
+    case 'הנעלה':
       return 'ביגוד וקניות אישיות';
 
     case 'בריאות ופארם':
+    case 'שירותי רפואה':
       return 'בריאות ורפואה';
 
     case 'חופשות וטיסות':
     case 'נופש ותיירות':
     case 'טיסות ומלונות':
+    case 'תיירות ונופש':
       return 'חופשות ונסיעות';
 
     case 'מנויים ותקשורת':
     case 'תקשורת וטכנולוגיה':
     case 'אינטרנט וסלולר':
+    case 'אינטרנט ותקשורת':
+    case 'שירותי תקשורת':
       return 'תקשורת ומנויים';
 
     default:
-      // Return trimmed if it's already a non-colliding custom category
-      return trimmed;
+      // Return null for unknown / technical strings so they do not pollute official categories
+      return null;
   }
 }
 

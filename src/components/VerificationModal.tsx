@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Transaction, LearnedRule, TransactionType } from '../types/financial';
+import { getFixedExpenseCategories } from '../services/categoriesService';
 import { AlertCircle, CheckCircle2, ShieldCheck, Sparkles, X, ArrowLeft } from 'lucide-react';
 
 interface VerificationModalProps {
@@ -217,15 +218,12 @@ export const VerificationModal: React.FC<VerificationModalProps> = ({
                 </label>
                 <div className="grid grid-cols-2 gap-2">
                   {(transaction.reviewOptions || [
+                    ...getFixedExpenseCategories().map((c) => c.name),
                     'משכורת והכנסות',
-                    'מזון וסופר',
-                    'מסעדות ובילויים',
-                    'קניות וביגוד',
-                    'תחבורה ורכב',
-                    'דיור וחשבונות',
                     'העברות ומזומן',
                     'החזרים וזיכויים',
-                    'לא ידוע / לבירור',
+                    'השקעות',
+                    'אחר / לבירור',
                   ]).map((opt) => (
                     <button
                       key={opt}

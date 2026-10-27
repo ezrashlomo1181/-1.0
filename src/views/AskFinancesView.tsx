@@ -124,14 +124,17 @@ export const AskFinancesView: React.FC<AskFinancesViewProps> = ({
         const foodTxs = transactions.filter(
           (t) =>
             !t.isInternalTransfer &&
-            (t.category === 'מזון וסופר' || t.category === 'מסעדות ומשלוחים')
+            (t.category === 'מזון וקניות לבית' ||
+              t.category === 'מזון וסופר' ||
+              t.category === 'מסעדות, קפה ומשלוחים' ||
+              t.category === 'מסעדות ומשלוחים')
         );
         const sum = foodTxs.reduce((s, t) => s + t.amount, 0);
         fallbackText = `בחודש האחרון (ספטמבר 2026), סך כל ההוצאות על מזון, סופרמרקט ומסעדות עמד על ₪${sum.toLocaleString()}. מתוכם ₪2,370 בסופרמרקטים (שופרסל, רמי לוי, יוחננוף) ו-₪${(
           sum - 2370
         ).toLocaleString()} במסעדות ומשלוחי Wolt.`;
         explanation =
-          'סיכום כל העסקאות שסווגו ל״מזון וסופר״ ו״מסעדות ומשלוחים״, בניכוי העברות פנימיות.';
+          'סיכום כל העסקאות שסווגו ל״מזון וקניות לבית״ ו״מסעדות, קפה ומשלוחים״, בניכוי העברות פנימיות.';
         metrics = [
           { label: 'סך הוצאות מזון ומסעדות', value: `₪${sum.toLocaleString()}` },
           { label: 'מספר עסקאות', value: `${foodTxs.length}` },

@@ -114,30 +114,109 @@ export function identifyDocumentRole(tx: Transaction): 'bank_statement' | 'credi
  * Check if a bank-side row represents a consolidated credit card debit/settlement
  */
 export function isConsolidatedCardSettlement(tx: Transaction): boolean {
-  const combined = `${tx.merchant} ${tx.description}`.toLowerCase();
-  return (
+  const combined = `${tx.merchant || ''} ${tx.description || ''} ${tx.rawText || ''}`.toLowerCase();
+
+  // Exclude explicit point-of-sale debit or regular retail purchases
+  if (
+    combined.includes('עסקה רגילה (כולל דביט)') ||
+    combined.includes('רכישת דביט') ||
+    combined.includes('משיכת דביט') ||
+    combined.includes('דביט מיידי')
+  ) {
+    return false;
+  }
+
+  // Check for consolidated settlement keywords
+  const hasSettlementKeyword =
     combined.includes('חיוב כרטיס') ||
+    combined.includes('חיוב כרטיסי אשראי') ||
     combined.includes('פירעון כרטיס') ||
+    combined.includes('פירעון כרטיסי אשראי') ||
+    combined.includes('חיוב מרוכז') ||
     combined.includes('חיוב ויזה') ||
     combined.includes('חיוב ישראכרט') ||
     combined.includes('חיוב כאל') ||
     combined.includes('חיוב מקס') ||
     combined.includes('חיוב מאסטרקארד') ||
     combined.includes('חיוב לאומי קארד') ||
-    combined.includes('הוראת קבע כרטיס אשראי') ||
+    combined.includes('חיוב אמריקן אקספרס') ||
+    combined.includes('חיוב דיינרס') ||
+    combined.includes('חיוב icc') ||
+    combined.includes('חיוב amex') ||
+    combined.includes('חיוב mastercard') ||
+    combined.includes('חיוב visa') ||
+    combined.includes('חיוב cal') ||
+    combined.includes('חיוב max') ||
+    combined.includes('חיוב isracard') ||
+    combined.includes('חיוב diners') ||
+    combined.includes('הוראת קבע כרטיס') ||
+    combined.includes('הוראת קבע כרטיסי אשראי') ||
     combined.includes('חיוב ח-ן כרטיס') ||
     combined.includes('חיוב חודשי כרטיס') ||
-    (combined.includes('ישראכרט') && combined.includes('חיוב')) ||
-    (combined.includes('מקס') && combined.includes('חיוב')) ||
-    (combined.includes('כאל') && combined.includes('חיוב'))
-  );
+    combined.includes('חיוב חודשי - כרטיס') ||
+    combined.includes('credit card settlement') ||
+    combined.includes('credit card payment') ||
+    combined.includes('card settlement');
+
+  if (hasSettlementKeyword) return true;
+
+  // Combination check: Card issuer name + settlement action
+  const hasIssuer =
+    combined.includes('ישראכרט') ||
+    combined.includes('isracard') ||
+    combined.includes('מקס') ||
+    combined.includes('max') ||
+    combined.includes('כאל') ||
+    combined.includes('cal') ||
+    combined.includes('ויזה') ||
+    combined.includes('visa') ||
+    combined.includes('מאסטרקארד') ||
+    combined.includes('mastercard') ||
+    combined.includes('דיינרס') ||
+    combined.includes('diners') ||
+    combined.includes('אמריקן אקספרס') ||
+    combined.includes('amex') ||
+    combined.includes('icc');
+
+  const hasAction =
+    combined.includes('חיוב') ||
+    combined.includes('פירעון') ||
+    combined.includes('סילוקין') ||
+    combined.includes('הוראת קבע');
+
+  if (hasIssuer && hasAction) {
+    const isRetailMerchant =
+      combined.includes('שופרסל') ||
+      combined.includes('סופר-פארם') ||
+      combined.includes('פארם') ||
+      combined.includes('קפה') ||
+      combined.includes('דלק') ||
+      combined.includes('מסעד') ||
+      combined.includes('רשת');
+    return !isRetailMerchant;
+  }
+
+  return false;
+}
+
+export interface CandidateStatementGroup {
+  groupKey: string;
+  cardDigits?: string;
+  billingDate?: string;
+  cycleKey: string;
+  accountName: string;
+  transactions: Transaction[];
+  netSum: number;
+  earliestDate: string;
+  latestDate: string;
 }
 
 /**
  * CENTRAL CROSS-DOCUMENT RECONCILIATION ENGINE
  *
- * Links bank-side consolidated settlements with detailed credit card statements.
- * Prevents double-counting in cash flow while preserving full provenance and original records.
+ * Tiered multi-level reconciliation linking bank-side consolidated settlements with detailed credit card statements.
+ * Enforces hierarchy: card last digits -> amount match -> billing cycle compatibility.
+ * Safeguards accounting integrity: unresolved debits remain expenses; never auto-matches ambiguous candidates.
  */
 export function reconcileCrossDocumentTransactions(transactions: Transaction[]): ReconciliationReport {
   if (!transactions || transactions.length === 0) {
@@ -166,94 +245,173 @@ export function reconcileCrossDocumentTransactions(transactions: Transaction[]):
   const detailedCardTxs: Transaction[] = [];
 
   for (const t of cloned) {
-    if (t.sourceDocumentType === 'bank_statement' && isConsolidatedCardSettlement(t)) {
+    const role = identifyDocumentRole(t);
+    if (role === 'bank_statement' && isConsolidatedCardSettlement(t)) {
       bankSettlements.push(t);
-    } else if (t.sourceDocumentType === 'credit_card_statement' && !isConsolidatedCardSettlement(t)) {
+    } else if ((role === 'credit_card_statement' || role === 'detailed_report') && !isConsolidatedCardSettlement(t)) {
       detailedCardTxs.push(t);
     }
   }
 
-  // Map detailed card transactions by billing cycle / month
-  // E.g., billingDate "2026-10-02" or month key "2026-10"
-  const cycleMap = new Map<string, Transaction[]>();
+  // Group detailed card transactions by card digits (or account) + billing cycle
+  const groupsMap = new Map<string, CandidateStatementGroup>();
+
   for (const cardTx of detailedCardTxs) {
-    // Primary key: billingDate if available, else transaction month
-    const key = cardTx.billingDate || cardTx.date.substring(0, 7);
-    if (!cycleMap.has(key)) cycleMap.set(key, []);
-    cycleMap.get(key)!.push(cardTx);
+    const cardDigits = extractCardLastDigits(cardTx);
+    const cardIdentifier = cardDigits ? `card_${cardDigits}` : (cardTx.accountId || cardTx.accountName || 'unknown_card');
+    const cycleKey = cardTx.billingDate || (cardTx.date ? cardTx.date.substring(0, 7) : 'unknown_cycle');
+    const groupKey = `${cardIdentifier}:::${cycleKey}`;
+
+    if (!groupsMap.has(groupKey)) {
+      groupsMap.set(groupKey, {
+        groupKey,
+        cardDigits,
+        billingDate: cardTx.billingDate,
+        cycleKey,
+        accountName: cardTx.accountName || 'כרטיס אשראי',
+        transactions: [],
+        netSum: 0,
+        earliestDate: cardTx.date,
+        latestDate: cardTx.date,
+      });
+    }
+
+    const group = groupsMap.get(groupKey)!;
+    group.transactions.push(cardTx);
+    if (!group.billingDate && cardTx.billingDate) {
+      group.billingDate = cardTx.billingDate;
+    }
+    if (!group.cardDigits && cardDigits) {
+      group.cardDigits = cardDigits;
+    }
+    if (cardTx.date < group.earliestDate) group.earliestDate = cardTx.date;
+    if (cardTx.date > group.latestDate) group.latestDate = cardTx.date;
   }
 
-  // Reconcile each bank settlement
+  // Calculate netSum for each group (purchases minus refunds)
+  for (const group of groupsMap.values()) {
+    group.netSum = group.transactions.reduce((sum, t) => {
+      const amt = Math.abs(t.amount);
+      return sum + (t.type === 'refund' ? -amt : amt);
+    }, 0);
+  }
+
+  const matchedGroupKeys = new Set<string>();
+
+  // Reconcile each bank settlement using tiered matching hierarchy
   for (const settlement of bankSettlements) {
     const settlementDate = settlement.date;
-    const settlementMonth = settlementDate.substring(0, 7);
-    const settlementAmt = settlement.amount;
+    const settlementAmt = Math.abs(settlement.amount);
+    const settlementDigits = extractCardLastDigits(settlement);
 
-    let matchedTxs: Transaction[] = [];
-    let matchEvidence = '';
-
-    // Strategy 1: Check cycle by exact billing date (e.g. bank settlement date matches billingDate)
-    const exactBillingMatches = cycleMap.get(settlementDate);
-    if (exactBillingMatches && exactBillingMatches.length > 0) {
-      const netSum = exactBillingMatches.reduce(
-        (sum, t) => sum + (t.type === 'refund' ? -t.amount : t.amount),
-        0
-      );
-      if (Math.abs(netSum - settlementAmt) <= 2.0) {
-        matchedTxs = exactBillingMatches;
-        matchEvidence = `התאמה מלאה: תאריך חיוב מדויק (${settlementDate}) וסכום זהה ₪${settlementAmt.toLocaleString()}`;
-      }
+    // Evaluate against all available candidate statement groups
+    interface GroupEval {
+      group: CandidateStatementGroup;
+      digitsMatch: boolean;
+      digitsMismatch: boolean;
+      isSumMatch: boolean;
+      diff: number;
+      isDateCompatible: boolean;
+      exactBillingMatch: boolean;
     }
 
-    // Strategy 2: Check all cycle buckets in the same month or nearby month (within +/- 1 month)
-    let hasUncertainCandidates = false;
-    let uncertainDiff = 0;
+    const groupEvals: GroupEval[] = [];
 
-    if (matchedTxs.length === 0) {
-      for (const [cycleKey, candidateTxs] of cycleMap.entries()) {
-        const netSum = candidateTxs.reduce(
-          (sum, t) => sum + (t.type === 'refund' ? -t.amount : t.amount),
-          0
-        );
+    for (const [key, group] of groupsMap.entries()) {
+      if (matchedGroupKeys.has(key)) continue;
 
-        // Check date proximity (within 45 days)
-        const sTime = new Date(settlementDate).getTime();
-        const cTime = new Date(candidateTxs[0].date).getTime();
-        const diffDays = Math.abs(sTime - cTime) / (1000 * 3600 * 24);
+      let digitsMatch = false;
+      let digitsMismatch = false;
 
-        if (diffDays <= 45) {
-          // Check if sum equals settlement amount (within 2.5 ILS tolerance for foreign rounding/fees)
-          if (Math.abs(netSum - settlementAmt) <= 2.5) {
-            matchedTxs = candidateTxs;
-            matchEvidence = `התאמת סכום כולל (₪${settlementAmt.toLocaleString()}) מול ${candidateTxs.length} עסקאות במחזור ${cycleKey}`;
-            break;
-          } else if (candidateTxs.length > 0 && Math.abs(netSum - settlementAmt) < settlementAmt * 0.5) {
-            // Potential cycle candidate exists but sum does not match closely
-            hasUncertainCandidates = true;
-            uncertainDiff = Math.abs(netSum - settlementAmt);
-          }
+      if (settlementDigits && group.cardDigits) {
+        if (settlementDigits === group.cardDigits) {
+          digitsMatch = true;
+        } else {
+          digitsMismatch = true;
         }
       }
+
+      const diff = Math.abs(group.netSum - settlementAmt);
+      const isSumMatch = diff <= 2.5;
+
+      // Date check
+      let isDateCompatible = false;
+      let exactBillingMatch = false;
+
+      if (group.billingDate) {
+        if (settlementDate === group.billingDate) {
+          isDateCompatible = true;
+          exactBillingMatch = true;
+        } else {
+          const sTime = new Date(settlementDate).getTime();
+          const bTime = new Date(group.billingDate).getTime();
+          const deltaDays = Math.round((sTime - bTime) / (1000 * 3600 * 24));
+          // Bank debit is usually on or within -3 to 14 days of card statement billing date
+          if (deltaDays >= -3 && deltaDays <= 14) {
+            isDateCompatible = true;
+          }
+        }
+      } else {
+        // Fallback to transaction date proximity (within 45 days)
+        const sTime = new Date(settlementDate).getTime();
+        const lTime = new Date(group.latestDate).getTime();
+        const deltaDays = Math.round((sTime - lTime) / (1000 * 3600 * 24));
+        if (deltaDays >= -3 && deltaDays <= 45) {
+          isDateCompatible = true;
+        }
+      }
+
+      groupEvals.push({
+        group,
+        digitsMatch,
+        digitsMismatch,
+        isSumMatch,
+        diff,
+        isDateCompatible,
+        exactBillingMatch,
+      });
     }
 
-    // Apply reconciliation outcome
-    if (matchedTxs.length > 0) {
-      reconciledSettlementsCount++;
-      matchedDetailedTransactionsCount += matchedTxs.length;
+    // Tier 1: Strong Candidates (matching digits + matching sum + compatible date)
+    const strongCandidates = groupEvals.filter(
+      (e) => e.digitsMatch && e.isSumMatch && e.isDateCompatible
+    );
 
-      // Mark the bank settlement as reconciled internal transfer
-      // Detailed transactions are kept as the actual expenses!
+    // Tier 2: Same card digits and cycle date, but sum discrepancy
+    const discrepancyCandidates = groupEvals.filter(
+      (e) => e.digitsMatch && !e.isSumMatch && e.isDateCompatible && e.diff < settlementAmt * 0.5
+    );
+
+    // Tier 3: Candidates without card digits (or unknown on one side) that match sum and date, with NO digits mismatch
+    const noDigitsSumMatches = groupEvals.filter(
+      (e) => !e.digitsMatch && !e.digitsMismatch && e.isSumMatch && e.isDateCompatible
+    );
+
+    if (strongCandidates.length === 1) {
+      // Unambiguous verified match by 4 digits and sum
+      const match = strongCandidates[0];
+      const matchedGroup = match.group;
+      matchedGroupKeys.add(matchedGroup.groupKey);
+
+      reconciledSettlementsCount++;
+      matchedDetailedTransactionsCount += matchedGroup.transactions.length;
+
       settlement.type = 'transfer';
       settlement.isInternalTransfer = true;
       settlement.isAggregateSettlement = true;
       settlement.reconciliationStatus = 'settlement_matched';
-      settlement.linkedTransactionIds = matchedTxs.map((t) => t.id);
-      settlement.reconciliationEvidence = matchEvidence;
+      settlement.cardLastDigits = settlementDigits || matchedGroup.cardDigits;
+      settlement.linkedTransactionIds = matchedGroup.transactions.map((t) => t.id);
+      settlement.reconciliationEvidence = `התאמה מלאה: 4 ספרות כרטיס (${settlement.cardLastDigits}), תאריך חיוב וסכום זהה ₪${settlementAmt.toLocaleString()}`;
       settlement.needsReview = false;
+      settlement.reviewReason = undefined;
 
-      // Mark detailed transactions as reconciled expenses
-      for (const dTx of matchedTxs) {
+      for (const dTx of matchedGroup.transactions) {
         dTx.reconciliationStatus = 'reconciled';
+        dTx.parentTransactionId = settlement.id;
+        if (!dTx.cardLastDigits && settlement.cardLastDigits) {
+          dTx.cardLastDigits = settlement.cardLastDigits;
+        }
         if (!dTx.linkedTransactionIds) dTx.linkedTransactionIds = [];
         if (!dTx.linkedTransactionIds.includes(settlement.id)) {
           dTx.linkedTransactionIds.push(settlement.id);
@@ -261,28 +419,109 @@ export function reconcileCrossDocumentTransactions(transactions: Transaction[]):
       }
 
       reconciliationNotes.push(
-        `הותאם חיוב כרטיס בעו"ש (₪${settlementAmt.toLocaleString()}) מול ${matchedTxs.length} עסקאות פירוט בכרטיס האשראי.`
+        `הותאם חיוב כרטיס בעו"ש (₪${settlementAmt.toLocaleString()}, כרטיס ${settlement.cardLastDigits}) מול ${matchedGroup.transactions.length} עסקאות פירוט.`
       );
-    } else if (hasUncertainCandidates) {
-      // Uncertain reconciliation: detailed transactions exist but sum does not match!
-      // Do NOT silently merge or classify as internal transfer. Preserve both and flag NeedsReview.
+    } else if (strongCandidates.length > 1) {
+      // Multiple cycles for the same card matching the exact amount - ambiguous!
       unmatchedSettlementsCount++;
       settlement.type = 'expense';
       settlement.isInternalTransfer = false;
       settlement.isAggregateSettlement = true;
       settlement.reconciliationStatus = 'partial';
       settlement.needsReview = true;
-      settlement.reviewReason = `זוהו עסקאות כרטיס אשראי אך הסכום אינו תואם במדויק (פער של ₪${Math.round(uncertainDiff).toLocaleString()}) מול החיוב בבנק – דרוש אימות משתמש.`;
+      settlement.reviewReason = `זוהו מספר מחזורים שונים של כרטיס ${settlementDigits} בעלי סכום זהה (₪${settlementAmt.toLocaleString()}) – דרוש אימות משתמש להכרעה.`;
 
       reconciliationNotes.push(
-        `התאמה לא ודאית: חיוב כרטיס בעו"ש (₪${settlementAmt.toLocaleString()}) עם פער מסכום הפירוט. הועבר לבקרת משתמש.`
+        `עמימות: מספר מחזורים של כרטיס ${settlementDigits} בעלי סכום זהה (₪${settlementAmt.toLocaleString()}). הועבר לבקרת משתמש.`
       );
-    } else {
-      // Unmatched bank settlement: No detailed card statement imported yet for this cycle!
-      // CRITICAL: Do NOT silently assume internal transfer! The spending must NOT disappear!
+    } else if (discrepancyCandidates.length > 0) {
+      // Found the card statement for this card, but sum does not match!
+      const disc = discrepancyCandidates[0];
       unmatchedSettlementsCount++;
       settlement.type = 'expense';
-      settlement.isInternalTransfer = false; // Kept as expense so the spending is NOT lost!
+      settlement.isInternalTransfer = false;
+      settlement.isAggregateSettlement = true;
+      settlement.reconciliationStatus = 'partial';
+      settlement.needsReview = true;
+      settlement.cardLastDigits = settlementDigits;
+      settlement.reviewReason = `זוהה פירוט עסקאות לכרטיס (${settlementDigits}) אך קיים פער סכום של ₪${Math.round(disc.diff).toLocaleString()} (חיוב בנק: ₪${settlementAmt.toLocaleString()} מול סכום עסקאות: ₪${disc.group.netSum.toLocaleString()}) – דרוש אימות משתמש.`;
+
+      reconciliationNotes.push(
+        `פער סכום: חיוב כרטיס ${settlementDigits} בעו"ש (₪${settlementAmt.toLocaleString()}) שונה מסכום הפירוט (₪${disc.group.netSum.toLocaleString()}). נשמר כהוצאה בבקרת משתמש.`
+      );
+    } else if (noDigitsSumMatches.length === 1) {
+      // Single match without 4 digits.
+      // Auto-confirm ONLY if exact billing date matches OR only 1 card group exists in system,
+      // and no other groups have confusing similar amounts.
+      const totalAvailableGroups = Array.from(groupsMap.values()).filter((g) => !matchedGroupKeys.has(g.groupKey));
+      const match = noDigitsSumMatches[0];
+
+      const otherConfusingGroups = totalAvailableGroups.filter(
+        (g) => g.groupKey !== match.group.groupKey && Math.abs(g.netSum - settlementAmt) < 50
+      );
+
+      if ((match.exactBillingMatch || totalAvailableGroups.length === 1) && otherConfusingGroups.length === 0) {
+        // Unambiguous match!
+        const matchedGroup = match.group;
+        matchedGroupKeys.add(matchedGroup.groupKey);
+
+        reconciledSettlementsCount++;
+        matchedDetailedTransactionsCount += matchedGroup.transactions.length;
+
+        settlement.type = 'transfer';
+        settlement.isInternalTransfer = true;
+        settlement.isAggregateSettlement = true;
+        settlement.reconciliationStatus = 'settlement_matched';
+        settlement.cardLastDigits = matchedGroup.cardDigits;
+        settlement.linkedTransactionIds = matchedGroup.transactions.map((t) => t.id);
+        settlement.reconciliationEvidence = `התאמה מלאה: תאריך חיוב חד-משמעי (${settlementDate}) וסכום זהה ₪${settlementAmt.toLocaleString()}`;
+        settlement.needsReview = false;
+        settlement.reviewReason = undefined;
+
+        for (const dTx of matchedGroup.transactions) {
+          dTx.reconciliationStatus = 'reconciled';
+          dTx.parentTransactionId = settlement.id;
+          if (!dTx.linkedTransactionIds) dTx.linkedTransactionIds = [];
+          if (!dTx.linkedTransactionIds.includes(settlement.id)) {
+            dTx.linkedTransactionIds.push(settlement.id);
+          }
+        }
+
+        reconciliationNotes.push(
+          `הותאם חיוב כרטיס בעו"ש (₪${settlementAmt.toLocaleString()}) מול ${matchedGroup.transactions.length} עסקאות פירוט ללא ספרות כרטיס (ראיות חד-משמעיות).`
+        );
+      } else {
+        // Ambiguous without digits
+        unmatchedSettlementsCount++;
+        settlement.type = 'expense';
+        settlement.isInternalTransfer = false;
+        settlement.isAggregateSettlement = true;
+        settlement.reconciliationStatus = 'partial';
+        settlement.needsReview = true;
+        settlement.reviewReason = `נמצאה התאמת סכום (₪${settlementAmt.toLocaleString()}) אך ללא 4 ספרות כרטיס מאמתות וללא תאריך חיוב חד-משמעי – נדרש אימות משתמש.`;
+
+        reconciliationNotes.push(
+          `עמימות: התאמת סכום ללא ספרות כרטיס מאמתות (₪${settlementAmt.toLocaleString()}). הועבר לבקרת משתמש.`
+        );
+      }
+    } else if (noDigitsSumMatches.length > 1) {
+      // Multiple cards with identical sum without digits (competing candidates!)
+      unmatchedSettlementsCount++;
+      settlement.type = 'expense';
+      settlement.isInternalTransfer = false;
+      settlement.isAggregateSettlement = true;
+      settlement.reconciliationStatus = 'partial';
+      settlement.needsReview = true;
+      settlement.reviewReason = `זוהו ${noDigitsSumMatches.length} כרטיסים שונים בעלי סכום זהה (₪${settlementAmt.toLocaleString()}) – נדרש אימות משתמש להכרעה בין הכרטיסים.`;
+
+      reconciliationNotes.push(
+        `עמימות: ${noDigitsSumMatches.length} כרטיסים שונים בעלי סכום זהה (₪${settlementAmt.toLocaleString()}). הועבר לבקרת משתמש.`
+      );
+    } else {
+      // No matching statement at all (missing statement file)
+      unmatchedSettlementsCount++;
+      settlement.type = 'expense';
+      settlement.isInternalTransfer = false;
       settlement.isAggregateSettlement = true;
       settlement.reconciliationStatus = 'unreconciled';
       settlement.category = settlement.category || 'חיוב כרטיס אשראי (ללא פירוט)';
@@ -300,7 +539,8 @@ export function reconcileCrossDocumentTransactions(transactions: Transaction[]):
   for (const t of cloned) {
     if (
       t.sourceDocumentType === 'bank_statement' &&
-      (t.merchant === 'עסקה ללא פירוט' || t.merchant === 'עסקה ללא שם' || t.merchant.includes('חיוב כרטיס')) &&
+      !isConsolidatedCardSettlement(t) &&
+      (t.merchant === 'עסקה ללא פירוט' || t.merchant === 'עסקה ללא שם' || t.merchant.includes('חיוב כרטיס') || t.description.includes('עסקה רגילה')) &&
       !t.linkedTransactionIds?.length
     ) {
       // Look for a single card transaction with identical date and amount
@@ -416,6 +656,10 @@ export function extractTransactionReference(tx: Transaction): string | undefined
  * Pure and read-only.
  */
 export function extractCardLastDigits(tx: Transaction): string | undefined {
+  if (tx.cardLastDigits && /^\d{4}$/.test(tx.cardLastDigits.trim())) {
+    return tx.cardLastDigits.trim();
+  }
+
   const textPool = [
     tx.merchant,
     tx.description,
@@ -427,10 +671,11 @@ export function extractCardLastDigits(tx: Transaction): string | undefined {
     .join(' ');
 
   const patterns = [
-    /(?:כרטיס|דביט|visa|cal|max|mastercard|ישראכרט)\D{0,10}(\d{4})\b/i,
+    /(?:כרטיס|דביט|visa|cal|max|mastercard|ישראכרט|amex|diners|אמריקן\s*אקספרס|דיינרס|לאומי\s*קארד|icc)\D{0,10}(\d{4})\b/i,
     /(?:\*|x{2,4}|X{2,4})\s*(\d{4})\b/,
     /\b(\d{4})\s*(?:כרטיס|דביט)/i,
     /סיומת\s*(\d{4})\b/i,
+    /(?:חשבון\s*כרטיס|כרטיס\s*מספר|מס['׳]?\s*כרטיס)\s*[:#\-]?\s*(\d{4})\b/i,
   ];
 
   for (const p of patterns) {

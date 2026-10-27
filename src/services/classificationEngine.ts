@@ -80,7 +80,8 @@ export const CATEGORY_MAP: {
       'קפה קפה', 'לנדוור', 'גרג', 'ביגה', 'רולדין', 'ארקפה', 'קפית', 'קפה גו', 'פיצה האט',
       'דומינוס פיצה', 'פיצה', 'בורגר ראנץ', 'בורגרים', 'מוזס', 'bbb', 'אגאדיר', 'גולדה', 'וניליה',
       'קפה נאמן', 'שניצל', 'פלאפל', 'שווארמה', 'חומוס', 'סושי', 'גפניקה', 'אושי אושי', 'מסעדה',
-      'בית קפה', 'בר', 'פאב', 'טברנה', 'ביסטרו', 'גלידריה', 'מזנון'
+      'בית קפה', 'בר', 'פאב', 'טברנה', 'ביסטרו', 'גלידריה', 'מזנון',
+      'קפה', 'קופי', 'קופי טיים', 'coffee', 'cafe', 'café', 'coffee time', 'אספרסו', 'רוסטרס'
     ],
     category: 'מסעדות, קפה ומשלוחים',
     type: 'expense'
@@ -219,6 +220,162 @@ export function matchLearnedRule(
   return null;
 }
 
+// Helper to clean payment processor prefixes and technical suffixes from merchant strings
+export function cleanMerchantAndPaymentPrefixes(merchant: string): string {
+  if (!merchant) return '';
+  let str = merchant.trim();
+
+  // Strip enclosing quotes
+  str = str.replace(/^["'״׳]+|["'״׳]+$/g, '').trim();
+
+  const prefixPatterns = [
+    /^(?:PAYPAL\s*\*?\s*)/i,
+    /^(?:PAYBOX\s*\*?\s*)/i,
+    /^(?:פייבוקס\s*[-*]?\s*)/i,
+    /^(?:BIT\s*[*–-]?\s*)/i,
+    /^(?:ביט\s*[*–-]?\s*)/i,
+    /^(?:הוראת\s+קבע\s*[-–:]?\s*)/i,
+    /^(?:ה\.קבע\s*[-–:]?\s*)/i,
+    /^(?:MAX\s*[-–:]\s*)/i,
+    /^(?:CAL\s*[-–:]\s*)/i,
+    /^(?:ISRACARD\s*[-–:]\s*)/i,
+    /^(?:ISR\s*[-–:]\s*)/i,
+    /^(?:ישראכרט\s*[-–:]\s*)/i,
+  ];
+
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const pat of prefixPatterns) {
+      if (pat.test(str)) {
+        const candidate = str.replace(pat, '').trim();
+        if (candidate.length > 0) {
+          str = candidate;
+          changed = true;
+        }
+      }
+    }
+  }
+
+  // Strip trailing corporate suffixes
+  str = str.replace(/\s+(?:בע["״']?מ\.?|ltd\.?|inc\.?|corp\.?|llc\.?)$/i, '').trim();
+
+  // Normalize multi-spaces
+  str = str.replace(/\s{2,}/g, ' ').trim();
+
+  return str || merchant.trim();
+}
+
+export interface BrandDefinition {
+  canonicalName: string;
+  category: string;
+  type?: TransactionType;
+  aliases: string[];
+}
+
+export const BRAND_CATALOG: BrandDefinition[] = [
+  {
+    canonicalName: 'Spotify',
+    category: 'תקשורת ומנויים',
+    type: 'expense',
+    aliases: ['spotify', 'ספוטיפיי', 'ספוטיפי', 'spotify.com'],
+  },
+  {
+    canonicalName: 'קופי טיים',
+    category: 'מסעדות, קפה ומשלוחים',
+    type: 'expense',
+    aliases: ['קופי טיים', 'coffee time', 'coffeetime', 'קופי-טיים'],
+  },
+  {
+    canonicalName: 'Netflix',
+    category: 'תקשורת ומנויים',
+    type: 'expense',
+    aliases: ['netflix', 'נטפליקס', 'נטפליכס'],
+  },
+  {
+    canonicalName: 'Apple',
+    category: 'תקשורת ומנויים',
+    type: 'expense',
+    aliases: ['apple.com/bill', 'itunes.com/bill', 'apple services'],
+  },
+  {
+    canonicalName: 'Google',
+    category: 'תקשורת ומנויים',
+    type: 'expense',
+    aliases: ['google storage', 'google one', 'google services', 'google workspace'],
+  },
+  {
+    canonicalName: 'Disney+',
+    category: 'תקשורת ומנויים',
+    type: 'expense',
+    aliases: ['disney+', 'disney plus', 'דיסני פלוס', 'דיסני+'],
+  },
+  {
+    canonicalName: 'Wolt',
+    category: 'מסעדות, קפה ומשלוחים',
+    type: 'expense',
+    aliases: ['wolt', 'וולט', 'wolt israel', 'וולט אנטרפרייז'],
+  },
+  {
+    canonicalName: 'Ten Bis',
+    category: 'מסעדות, קפה ומשלוחים',
+    type: 'expense',
+    aliases: ['תן ביס', '10bis', 'tenbis', 'תן-ביס'],
+  },
+  {
+    canonicalName: 'Super-Pharm',
+    category: 'פארם',
+    type: 'expense',
+    aliases: ['סופר פארם', 'סופר-פארם', 'super-pharm', 'super pharm', 'סופרפארם'],
+  },
+  {
+    canonicalName: 'Shufersal',
+    category: 'מזון וקניות לבית',
+    type: 'expense',
+    aliases: ['שופרסל', 'שופרסל דיל', 'שופרסל שלי', 'שופרסל אקספרס', 'שופרסל online', 'shufersal'],
+  },
+  {
+    canonicalName: 'Rami Levy',
+    category: 'מזון וקניות לבית',
+    type: 'expense',
+    aliases: ['רמי לוי', 'רמי לוי שיווק השקמה', 'rami levy'],
+  },
+  {
+    canonicalName: 'Pango',
+    category: 'רכב ותחבורה',
+    type: 'expense',
+    aliases: ['פנגו', 'pango', 'פנגו+', 'פנגו פיי'],
+  },
+  {
+    canonicalName: 'Cello',
+    category: 'רכב ותחבורה',
+    type: 'expense',
+    aliases: ['סלופארק', 'cellopark', 'סלו פארק', 'cello'],
+  },
+  {
+    canonicalName: 'Rav Kav',
+    category: 'רכב ותחבורה',
+    type: 'expense',
+    aliases: ['רב קו', 'רב-קו', 'rav kav', 'rav-kav', 'הופאון רב קו'],
+  },
+];
+
+export function findBrandMatch(cleanMerchant: string, fullText: string): BrandDefinition | null {
+  const mLower = cleanMerchant.toLowerCase().trim();
+  const textLower = fullText.toLowerCase().trim();
+  if (!mLower && !textLower) return null;
+
+  for (const brand of BRAND_CATALOG) {
+    for (const alias of brand.aliases) {
+      const aLower = alias.toLowerCase();
+      if (mLower === aLower || matchesKeyword(mLower, aLower) || matchesKeyword(textLower, aLower)) {
+        return brand;
+      }
+    }
+  }
+  return null;
+}
+
 /**
  * CENTRAL SEMANTIC CLASSIFICATION ENGINE
  *
@@ -253,7 +410,8 @@ export function classifyTransactionSemantics(params: {
 
   const mClean = merchant.trim();
   const dClean = description.trim();
-  const combined = `${mClean} ${dClean} ${rawCategory}`.toLowerCase();
+  const mNormalized = cleanMerchantAndPaymentPrefixes(mClean);
+  const combined = `${mNormalized} ${mClean} ${dClean} ${rawCategory}`.toLowerCase();
 
   // 1. PRIORITY 1: User learned rule
   const userRule = matchLearnedRule(mClean, dClean, customRules);
@@ -307,16 +465,31 @@ export function classifyTransactionSemantics(params: {
   // It starts as an expense with needsReview=true and reconciliationStatus=unreconciled.
   // Cross-document reconciliation will only convert it to an internal transfer if detailed card transactions exist and match.
   if (
-    combined.includes('חיוב כרטיס') ||
-    combined.includes('פירעון כרטיס') ||
-    combined.includes('חיוב ויזה') ||
-    combined.includes('חיוב ישראכרט') ||
-    combined.includes('חיוב כאל') ||
-    combined.includes('חיוב מקס') ||
-    combined.includes('חיוב מאסטרקארד') ||
-    combined.includes('חיוב לאומי קארד') ||
-    combined.includes('הוראת קבע כרטיס אשראי') ||
-    combined.includes('חיוב ח-ן כרטיס')
+    !combined.includes('עסקה רגילה (כולל דביט)') &&
+    !combined.includes('רכישת דביט') &&
+    !combined.includes('משיכת דביט') &&
+    (combined.includes('חיוב כרטיס') ||
+      combined.includes('חיוב כרטיסי אשראי') ||
+      combined.includes('פירעון כרטיס') ||
+      combined.includes('פירעון כרטיסי אשראי') ||
+      combined.includes('חיוב מרוכז') ||
+      combined.includes('חיוב ויזה') ||
+      combined.includes('חיוב ישראכרט') ||
+      combined.includes('חיוב כאל') ||
+      combined.includes('חיוב מקס') ||
+      combined.includes('חיוב מאסטרקארד') ||
+      combined.includes('חיוב לאומי קארד') ||
+      combined.includes('חיוב אמריקן אקספרס') ||
+      combined.includes('חיוב דיינרס') ||
+      combined.includes('חיוב icc') ||
+      combined.includes('חיוב amex') ||
+      combined.includes('חיוב mastercard') ||
+      combined.includes('חיוב visa') ||
+      combined.includes('הוראת קבע כרטיס') ||
+      combined.includes('חיוב ח-ן כרטיס') ||
+      combined.includes('חיוב חודשי כרטיס') ||
+      combined.includes('credit card settlement') ||
+      combined.includes('card settlement'))
   ) {
     return {
       category: 'חיוב כרטיס אשראי (ללא פירוט)',
@@ -454,20 +627,26 @@ export function classifyTransactionSemantics(params: {
       combined.includes('one zero') ||
       combined.includes('העברה מבנק'));
 
-  // 3. PRIORITY 3: Merchant context lookup
+  // 3. PRIORITY 3: Merchant & Brand context lookup
   const sanitizedRawCategory = isTechnicalTransactionType(rawCategory)
     ? ''
     : (resolveToCanonicalExpenseCategory(rawCategory) || '');
 
   let matchedCategory = '';
-  for (const rule of CATEGORY_MAP) {
-    for (const kw of rule.keywords) {
-      if (matchesKeyword(combined, kw)) {
-        matchedCategory = rule.category;
-        break;
+  const matchedBrand = findBrandMatch(mNormalized, combined);
+
+  if (matchedBrand) {
+    matchedCategory = matchedBrand.category;
+  } else {
+    for (const rule of CATEGORY_MAP) {
+      for (const kw of rule.keywords) {
+        if (matchesKeyword(combined, kw)) {
+          matchedCategory = rule.category;
+          break;
+        }
       }
+      if (matchedCategory) break;
     }
-    if (matchedCategory) break;
   }
 
   if (!matchedCategory && sanitizedRawCategory) {
@@ -488,12 +667,13 @@ export function classifyTransactionSemantics(params: {
   ].includes(matchedCategory);
 
   // 4. PRIORITY 4: Handle Credit Rows / Positive Inflows & Explicit Income
-  // On bank checking accounts (!isCreditCardSource), positive amounts in single-amount columns
-  // or explicit income/salary keywords are genuine income inflows even if isCreditRow wasn't pre-set to true.
+  // A row is considered a credit/inflow if isCreditRow is explicitly true,
+  // or if it is a negative amount on a credit card statement,
+  // or on a bank statement with a positive amount column if it is not an ordinary consumer expense.
   const isRowInCreditOrDeposit =
     isCreditRow ||
     (amountIsNegative && isCreditCardSource) ||
-    (!isCreditCardSource && !amountIsNegative && !isDebitRow);
+    (!isCreditCardSource && !amountIsNegative && !isDebitRow && !matchedBrand && !isConsumerCategory);
 
   // 4.1 Explicit Genuine Income (Salary, payroll clearing, pension, allowance, Mofet, Matash, Masav, Hilan, etc.)
   // On bank checking accounts, explicit income keywords identify income regardless of whether isCreditRow is pre-set.
@@ -520,7 +700,7 @@ export function classifyTransactionSemantics(params: {
       return {
         category: matchedCategory || 'החזרים וזיכויים',
         type: 'refund',
-        confidenceScore: isCreditCardSource ? 0.94 : 0.9,
+        confidenceScore: isCreditCardSource ? 0.95 : 0.9,
         confidenceLevel: 'high',
         isInternalTransfer: false,
         isUserRule: false,
@@ -528,12 +708,12 @@ export function classifyTransactionSemantics(params: {
       };
     }
 
-    // 4.3 Credit Card Statement with Consumer Merchant -> legitimate purchase refund
-    if (isCreditCardSource && isConsumerCategory) {
+    // 4.3 Credit Card Statement with Consumer Merchant / Brand -> legitimate purchase refund
+    if (isCreditCardSource && (isConsumerCategory || matchedBrand)) {
       return {
         category: matchedCategory,
         type: 'refund',
-        confidenceScore: 0.94,
+        confidenceScore: 0.95,
         confidenceLevel: 'high',
         isInternalTransfer: false,
         isUserRule: false,
@@ -587,7 +767,19 @@ export function classifyTransactionSemantics(params: {
     };
   }
 
-  // 5. Normal Category Expense Fallback
+  // 5. Normal Category / Brand Expense Fallback
+  if (matchedBrand) {
+    return {
+      category: matchedBrand.category,
+      type: matchedBrand.type || 'expense',
+      confidenceScore: 0.95,
+      confidenceLevel: 'high',
+      isInternalTransfer: false,
+      isUserRule: false,
+      needsReview: false,
+    };
+  }
+
   if (matchedCategory) {
     return {
       category: matchedCategory,
